@@ -14,6 +14,11 @@ First, let's setup a conda environment using the following command.
 
 ```
 conda create -n surface python=3.9.5
+```
+
+Activate the environment
+
+```
 
 conda activate surface
 ```
@@ -26,6 +31,8 @@ pip install -r requirements.txt
 Then we will add the conda environment to jupyter hub 
 ```
 conda install ipykernel
+```
+```
 python -m ipykernel install --user --name=surface
 ```
 
