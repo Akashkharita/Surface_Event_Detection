@@ -36,9 +36,13 @@ conda install ipykernel
 python -m ipykernel install --user --name=surface
 ```
 
+
+Now we are all set to go! 😃
+
 ## Usage
 
-Examples of how to use...
+The notebook [notebook](Notebooks/Testing_Surface_Event_Detection_on_verified_events.ipynb)
+
 
 ## Contributing
 
