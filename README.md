@@ -40,8 +40,10 @@ python -m ipykernel install --user --name=surface
 Now we are all set to go! 😃
 
 ## Usage
+The folder [Common_Scripts](Common_Scripts)
 
-The notebook [notebook](Notebooks/Testing_Surface_Event_Detection_on_verified_events.ipynb)
+
+The [notebook](Notebooks/Testing_Surface_Event_Detection_on_verified_events.ipynb) shows an example of how to detect surface events through continuous seismograms and visualize the results with detailed documentation. 
 
 
 ## Contributing
