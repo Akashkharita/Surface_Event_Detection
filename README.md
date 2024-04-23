@@ -23,6 +23,12 @@ Then we will install the required dependencies
 pip install -r requirements.txt
 ```
 
+Then we will add the conda environment to jupyter hub 
+```
+conda install ipykernel
+python -m ipykernel install --user --name=surface
+```
+
 ## Usage
 
 Examples of how to use...
