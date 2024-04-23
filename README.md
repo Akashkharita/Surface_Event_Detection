@@ -14,6 +14,13 @@ First, let's setup a conda environment using the following command.
 
 ```
 conda create -n surface python=3.9.5
+
+conda activate surface
+```
+
+Then we will install the required dependencies 
+```
+pip install -r requirements.txt
 ```
 
 ## Usage
