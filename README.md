@@ -15,7 +15,22 @@ The model classifies a 150s window with a user-defined stride and outputs a clas
 
 Instructions on how to install...
 
-First, let's setup a conda environment using the following command. 
+First we will clone the repository by going to the terminal and typing
+
+```
+git clone https://github.com/Akashkharita/Surface_Event_Detection.git
+
+```
+
+
+Then we will enter the repository by
+
+```
+cd Surface_Event_Detection
+```
+
+
+Second, let's setup a conda environment using the following command. 
 
 ```
 conda create -n surface python=3.9.5
