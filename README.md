@@ -4,7 +4,7 @@
 - [License](#license)
 
 
-# My Project
+# Surface Event Detection
 
 ## Installation
 
