@@ -10,6 +10,12 @@
 
 Instructions on how to install...
 
+First, let's setup a conda environment using the following command. 
+
+```
+conda create -n surface python=3.9.5
+```
+
 ## Usage
 
 Examples of how to use...
