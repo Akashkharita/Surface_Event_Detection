@@ -11,6 +11,9 @@ The model was trained on over 200k seismic events in the Pacific northwest. [Ni 
 For more information about the model training and tuning, please check out this [github repository](https://github.com/Akashkharita/PNW_seismic_event_classification_ML/tree/main)
 The model classifies a 150s window with a user-defined stride and outputs a class and probabilities associated with each class for each window. It is trained to classify the data into four classes - 1. Earthquake, 2. Explosions, 3. Noise and 4. Surface Events. 
 
+
+Following figure shows different glaciers in Mount Rainier that hosts a variety of surface events on which our model was trained. 
+
 ![Glaciers in Mount Rainier](Extras/Mt_Rainier_Glaciers.png)
 
 
