@@ -170,10 +170,40 @@ else:
 
     
     
-def surface_event_detection():
+def surface_event_detection(starttime = starttime, stations_id = stations_id, dur = dur):
+   
+    """
+    Detects surface event from continous seismograms. This code will first download the waveforms from each station using 
+    IRIS client. then it will go through each trace, extract features from each window and use our pretrained model to classify that window. 
+
+    Parameters:
+    starttime (obspy.UTCDateTime object): the starttime of the trace from where we want to start running our detector.
+    stations_id (list network.station): The list of stations on which our classifier would run. 
+    dur (s): Duration of the trace in seconds on which we want to run our classifier. 
+
+    Returns:
+    results_stns: is a list containing the classification results for each downloaded station (0: Earthquake, 1: Explosion, 2: Noise, 3: Surface Event. 
+    
+    index_stns: is a list containing the index of each classification window for each downloaded station
+    
+    prob_stns: is a list containing probabilities of all the classes for each station
+    
+    st_overall: is a list that contains all the streams that were downloaded. 
+    
+    st_overall_data: is a list that contains all the numerical data for each station
+    
+    st_overall_times: is a list that contains all the times corresponding to all the data that were downloaded in the st_overall_data
+    
+    """
+        
+        
+        
 
     # grabbing the columns of common dataset. 
     columns = common_dataset.columns[1:]
+    
+    
+    # initializing empty lists
     st_data_full = []
     result_stns = []
     index_stns = []
@@ -224,6 +254,8 @@ def surface_event_detection():
             # resampling all the data to 100 Hz since thats 
             st = st.resample(samp_freq) 
 
+            
+            # detrending the data. 
             st.detrend()
 
             st_data_full = []

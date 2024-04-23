@@ -117,3 +117,44 @@ def butterworth_filter(arrays, lowcut = 1, highcut = 10, fs = 100, num_corners =
     
     
     
+def plot_detection_results(st_overall_data = st_overall_data, st_overall_times = st_overall_times, st_overall = st_overall, result_stns = result_stns, index_stns = index_stns, prob_stns = prob_stns, xlim = [0,300]):
+    plt.rcParams['xtick.labelsize'] = 16  # Font size for xtick labels
+    plt.rcParams['ytick.labelsize'] = 20  # Font size for ytick labels
+
+    fig, axs = plt.subplots(len(st_overall_data), 1, figsize=(15, 3*len(st_overall_data)))
+
+    for k in range(len(st_overall_data)):
+
+        ## This is plotting the normalized data
+        axs[k].plot(st_overall_times[k], st_overall_data[k] / np.max(abs(st_overall_data[k])))
+
+        ## Setting the title of the plot
+        axs[k].set_title(st_overall[k][0].id, fontsize=20)
+
+        ## These are the colors of detection window. 
+        colors = ['black', 'blue', 'white', 'red']
+        for i in range(len(index_stns[k])):
+            axs[k].axvline(30 * index_stns[k][i] + 75, ls='--', color=colors[int(result_stns[k][i])], alpha = 0.6)
+        for i in range(len(index_stns[k])):
+            if result_stns[k][i] == 3:
+                axs[k].scatter(30 * np.array(index_stns[k])[i] + 75, np.array(prob_stns[k])[:, :, 3][i], ec='k', marker='o', c='red', s=100)
+            elif result_stns[k][i] == 0:
+                axs[k].scatter(30 * np.array(index_stns[k])[i] + 75, np.array(prob_stns[k])[:, :, 3][i], ec='k', marker='o', c='black', s=100)
+            elif result_stns[k][i] == 1:
+                axs[k].scatter(30 * np.array(index_stns[k])[i] + 75, np.array(prob_stns[k])[:, :, 3][i], ec='k', marker='o', c='blue', s=100)
+            else:
+                axs[k].scatter(30 * np.array(index_stns[k])[i] + 75, np.array(prob_stns[k])[:, :, 3][i], ec='k', marker='o', c='white', s=100,)
+
+        # Create custom legend for circular markers
+        legend_elements = [
+            mlines.Line2D([], [], marker='o', color='red', label='Prob (Su)', markersize=10)
+        ]
+        axs[k].legend(handles=legend_elements, loc='upper right', fontsize=12)
+
+        axs[k].set_xlabel('Time(s) since ' + str(starttime).split('.')[0], fontsize=20)
+        axs[k].set_xlim(xlim[0], xlim[1])  # Set x-axis limits if needed
+
+    plt.tight_layout()  # Adjust subplots to avoid overlap
+    plt.show()
+
+    
