@@ -17,7 +17,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 #from xgboost import XGBClassifier
 from sklearn.decomposition import PCA
-from imblearn.under_sampling import RandomUnderSampler
+#from imblearn.under_sampling import RandomUnderSampler
 from scipy import stats, signal
 from sklearn.datasets import load_iris
 from sklearn.metrics import precision_score, recall_score
