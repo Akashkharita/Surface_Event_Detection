@@ -267,10 +267,10 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
             time = []
             index = []
 
-            for i in tqdm(range(len(norm))):
+            for i in range(len(norm)):
 
 
-                tsfel_features = time_series_features_extractor(cfg_file_sample, norm[i], fs=100)
+                tsfel_features = time_series_features_extractor(cfg_file_sample, norm[i], fs=100, verbose = 0)
                 tr_full = obspy.Trace(norm[i])
                 tr_full.stats.sampling_rate = 100
                 physical_features = seis_feature.compute_physical_features(tr=tr_full, envfilter=False)

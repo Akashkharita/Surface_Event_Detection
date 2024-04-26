@@ -13,4 +13,3 @@ seaborn==0.11.2
 tsfel==0.1.4
 zenodo_get==1.5.1
 PyYAML==6.0.1
-jupyter
