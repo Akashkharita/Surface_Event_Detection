@@ -67,7 +67,7 @@ from common_processing_functions import butterworth_filter
 import json
 import os
 from zenodo_get import zenodo_get
-import yaml
+
 
 
 
@@ -83,6 +83,7 @@ stations_id = config['stations_id']
 # Access the settings
 common_dataset = pd.read_csv(config['common_dataset_path'])
 scaler_params = pd.read_csv(config['scaler_params_path'])
+scaler_params.drop([''])
 
 lowcut = config['bandpass_filter']['lowcut']
 highcut = config['bandpass_filter']['highcut']
@@ -170,40 +171,10 @@ else:
 
     
     
-def surface_event_detection(starttime = starttime, stations_id = stations_id, dur = dur):
-   
-    """
-    Detects surface event from continous seismograms. This code will first download the waveforms from each station using 
-    IRIS client. then it will go through each trace, extract features from each window and use our pretrained model to classify that window. 
-
-    Parameters:
-    starttime (obspy.UTCDateTime object): the starttime of the trace from where we want to start running our detector.
-    stations_id (list network.station): The list of stations on which our classifier would run. 
-    dur (s): Duration of the trace in seconds on which we want to run our classifier. 
-
-    Returns:
-    results_stns: is a list containing the classification results for each downloaded station (0: Earthquake, 1: Explosion, 2: Noise, 3: Surface Event. 
-    
-    index_stns: is a list containing the index of each classification window for each downloaded station
-    
-    prob_stns: is a list containing probabilities of all the classes for each station
-    
-    st_overall: is a list that contains all the streams that were downloaded. 
-    
-    st_overall_data: is a list that contains all the numerical data for each station
-    
-    st_overall_times: is a list that contains all the times corresponding to all the data that were downloaded in the st_overall_data
-    
-    """
-        
-        
-        
+def surface_event_detection():
 
     # grabbing the columns of common dataset. 
     columns = common_dataset.columns[1:]
-    
-    
-    # initializing empty lists
     st_data_full = []
     result_stns = []
     index_stns = []
@@ -254,8 +225,6 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
             # resampling all the data to 100 Hz since thats 
             st = st.resample(samp_freq) 
 
-            
-            # detrending the data. 
             st.detrend()
 
             st_data_full = []
@@ -298,16 +267,16 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
             time = []
             index = []
 
-            for i in range(len(norm)):
+            for i in tqdm(range(len(norm))):
 
 
-                tsfel_features = time_series_features_extractor(cfg_file_sample, norm[i], fs=100, verbose = 0)
+                tsfel_features = time_series_features_extractor(cfg_file_sample, norm[i], fs=100)
                 tr_full = obspy.Trace(norm[i])
                 tr_full.stats.sampling_rate = 100
                 physical_features = seis_feature.compute_physical_features(tr=tr_full, envfilter=False)
 
                 final_features = pd.concat([tsfel_features, physical_features], axis=1)
-                final_features['hod'] = (starttime).hour - 8                                                               
+                final_features['hod'] = (starttime).hour - 8
                 final_features['dow'] = (starttime).weekday
                 final_features['moy'] = (starttime).month
 
