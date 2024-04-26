@@ -21,6 +21,28 @@ Following figure shows different glaciers in Mount Rainier that hosts a variety 
 
 Instructions on how to install...
 
+If we are running this on the cloud we will look at the instructions in this book to understand how to run this notebook on a cloud - [HPSBook](https://seisscoped.org/HPS-book/chapters/cloud/AWS_101.html).
+
+Once we are in a instance we will run this code - 
+
+```
+sudo yum install -y git
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+chmod +x Miniconda3-latest-Linux-x86_64.sh 
+./Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda
+./miniconda/bin/conda init bash
+bash
+```
+
+And then we are going to run - 
+```
+sudo yum groupinstall "Development Tools"
+```
+
+
+Following instructions can be followed on your local system as well as on the cloud (after following the instructions above)
+
+
 First we will clone the repository by going to the terminal and typing
 
 ```
@@ -53,6 +75,13 @@ Then we will install the required dependencies
 ```
 pip install -r requirements.txt
 ```
+Then we will install the jupyter notebook by running 
+
+```
+pip install jupyter
+```
+
+
 
 Then we will add the conda environment to jupyter hub 
 ```
