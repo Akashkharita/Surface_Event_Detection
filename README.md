@@ -94,6 +94,21 @@ python -m ipykernel install --user --name=surface
 
 Now we are all set to go! 😃
 
+
+If you are on cloud run this - 
+
+```
+jupyter notebook --ip 0.0.0.0 --allow-root
+```
+
+If you are on local machine, just run this - 
+
+```
+jupyter notebook
+```
+
+
+
 ## Usage
 The [notebook](Notebooks/Automated_Surface_Event_Detection.ipynb) shows an example of how to detect surface events through continuous seismograms and visualize the results with detailed documentation. I showed the entire process by using three examples of verified surface events (one example each of avalanche, fall and flows). The users are free to run the model on the timing and stations of their choice. 
 
