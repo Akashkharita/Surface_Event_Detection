@@ -13,7 +13,7 @@ import obspy
 from obspy.clients.fdsn.mass_downloader import CircularDomain, \
     Restrictions, MassDownloader
 
-
+import yaml
 
 
 # importing the dependencies. 
@@ -83,7 +83,7 @@ stations_id = config['stations_id']
 # Access the settings
 common_dataset = pd.read_csv(config['common_dataset_path'])
 scaler_params = pd.read_csv(config['scaler_params_path'])
-scaler_params.drop([''])
+
 
 lowcut = config['bandpass_filter']['lowcut']
 highcut = config['bandpass_filter']['highcut']
@@ -119,7 +119,7 @@ stride = config['stride']
 
 
 # Defining the client
-client = Client(config['iris_client'])
+client = Client('IRIS')
 
 
 # Defining the location code 
@@ -171,7 +171,7 @@ else:
 
     
     
-def surface_event_detection():
+def surface_event_detection(starttime = starttime, stations_id = stations_id, dur = dur):
 
     # grabbing the columns of common dataset. 
     columns = common_dataset.columns[1:]
