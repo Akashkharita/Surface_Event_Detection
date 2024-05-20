@@ -35,7 +35,7 @@ import tsfel
 import random
 import calendar
 import concurrent.futures
-
+import seaborn as sns
 
 # We need to change the path to import the seis feature library. 
 
