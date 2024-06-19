@@ -57,7 +57,7 @@ import seaborn as sns
 import sys
 sys.path.append('../Common_Scripts/')
 
-import seis_feature
+import seis_feature_new
 
 
 sys.path.append('../Common_Scripts/')
@@ -82,7 +82,8 @@ stations_id = config['stations_id']
     
 # Access the settings
 common_dataset = pd.read_csv(config['common_dataset_path'])
-scaler_params = pd.read_csv(config['scaler_params_path'])
+
+
 
 
 lowcut = config['bandpass_filter']['lowcut']
@@ -143,23 +144,22 @@ with open(file_path, 'r') as f:
     cfg_file_sample = json.load(f)
 
 
-
+cfg_file = tsfel.get_features_by_domain()
     
 ## Downloading the trained model from zenodo
-
-doi = '10.5281/zenodo.11043908'  #Downloading the model trained on top 50 features
+doi = '10.5281/zenodo.12171547'  #Downloading the model trained on top 50 features
 files = zenodo_get([doi])
 
 
 
 
 # Later, you can load the model from disk
-loaded_model = load('best_rf_model_top_50_features_50_100.joblib')
+loaded_model = load('best_rf_model_all_features_50_100.joblib')
 
 
 ## Deleting the downloaded file since its very large
 # Specify the file path
-file_path = 'best_rf_model_top_50_features_50_100.joblib'
+file_path = 'best_rf_model_all_features_50_100.joblib'
 
 # Check if the file exists
 if os.path.exists(file_path):
@@ -170,11 +170,11 @@ else:
     print(f"File '{file_path}' does not exist.")
 
     
-    
+scaler_params = pd.read_csv('scaler_params.csv')
+columns = scaler_params['Feature'].values
 def surface_event_detection(starttime = starttime, stations_id = stations_id, dur = dur):
 
-    # grabbing the columns of common dataset. 
-    columns = common_dataset.columns[1:]
+
     st_data_full = []
     result_stns = []
     index_stns = []
@@ -218,8 +218,9 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
                                               network=network, channel='HHZ', location=location)
                 except:
                     pass
-
-
+                
+                
+                
         try:
 
             # resampling all the data to 100 Hz since thats 
@@ -270,17 +271,13 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
             for i in range(len(norm)):
 
 
-                tsfel_features = time_series_features_extractor(cfg_file_sample, norm[i], fs=100, verbose = 0)
-                tr_full = obspy.Trace(norm[i])
-                tr_full.stats.sampling_rate = 100
-                physical_features = seis_feature.compute_physical_features(tr=tr_full, envfilter=False)
+                tsfel_features = time_series_features_extractor(cfg_file, norm[i], fs=100, verbose = 0)
+                physical_features = seis_feature_new.FeatureCalculator(norm[i],  fs = 100).compute_features()
 
                 final_features = pd.concat([tsfel_features, physical_features], axis=1)
-                final_features['hod'] = (starttime).hour - 8
-                final_features['dow'] = (starttime).weekday
-                final_features['moy'] = (starttime).month
-
                 features = final_features.loc[:, columns]
+
+                
                 scaler_params.index = scaler_params.iloc[:,1]
                 final_scaler_params = scaler_params.loc[features.columns]
 
@@ -290,6 +287,10 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
                 # Check for NaN values in features
                 if features.isnull().values.any():
                     print(f"NaN values detected in iteration {i}. Skipping prediction.")
+
+                features['hod'] = (starttime).hour - 8
+                features['dow'] = (starttime).weekday
+                features['moy'] = (starttime).month
 
                 #features['E_20_50'] = 0.001
                 # extracting the results.
@@ -301,8 +302,10 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
             result_stns.append(result)
             index_stns.append(index)
             prob_stns.append(prob)
+         
         except:
             pass
+        
         
     return result_stns, index_stns, prob_stns, st_overall, st_overall_data, st_overall_times
 
