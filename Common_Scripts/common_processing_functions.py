@@ -47,7 +47,16 @@ from multiprocessing import Pool
 from tsfel import time_series_features_extractor, get_features_by_domain
 from functools import partial
 import multiprocessing
+from scipy.signal import resample
 
+
+def resample_array(arr, original_rate, desired_rate):
+    ## This function uses scipy resample. 
+    
+    num_samples = len(arr)
+    duration = num_samples / original_rate  # Duration of the array in seconds
+    new_num_samples = int(duration * desired_rate)
+    return resample(arr, new_num_samples)
 
 
 

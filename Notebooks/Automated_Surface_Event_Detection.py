@@ -116,7 +116,7 @@ samp_freq = config['samp_freq']
 win = config['win']
 
 # stride for the detector (time x freq)
-stride = config['stride']
+stride = 3000
 
 
 # Defining the client
@@ -258,7 +258,7 @@ def surface_event_detection(starttime = starttime, stations_id = stations_id, du
 
             trace_data = np.array(trace_data)
             tapered = apply_cosine_taper(trace_data)
-            filtered = butterworth_filter(tapered, lowcut, highcut, fs, num_corners, filter_type='bandpass')
+            filtered = butterworth_filter(trace_data, lowcut, highcut, fs, num_corners, filter_type='bandpass')
 
             # Applying the normalization.
             norm = filtered / np.max(abs(np.stack(filtered)), axis=1)[:, np.newaxis]
