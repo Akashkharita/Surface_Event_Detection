@@ -14,3 +14,5 @@ tsfel==0.1.4
 zenodo_get==1.5.1
 PyYAML==6.0.1
 imbalanced-learn==0.7.0
+torchvision==0.19.0
+torch==2.4.0
