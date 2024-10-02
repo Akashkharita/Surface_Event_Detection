@@ -112,6 +112,10 @@ jupyter notebook
 ## Usage
 The [notebook](Notebooks/Automated_Surface_Event_Detection.ipynb) shows an example of how to detect surface events through continuous seismograms and visualize the results with detailed documentation. I showed the entire process by using three examples of verified surface events (one example each of avalanche, fall and flows). The users are free to run the model on the timing and stations of their choice. 
 
+The notebook **analyzing_results_of_all_models_on_jiggled_events** is comaparing the station wise and event wise performance of different models at a variety of thresholds, computing confusion matrices, and plotting the misclassification rate with respect to distance and snr. 
+
+The notebook **classification_demo_earthquake_all_models** and **classification_demo_surface_events_all_models**  shows the demo of how to compute and plot the classification results of all (deep learning and machine learning models)
+
 
 ## Contributing
 Anyone is welcome to contribute to improve the codes and visualization of the results. I am available at my email  - ak287@uw.edu for further collaboration. 
