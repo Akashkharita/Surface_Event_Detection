@@ -540,5 +540,107 @@ def plot_all_model_predictions(fig_size, signal_length, big_reshaped_data, stn_p
     
     
 
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
+from utils import apply_cosine_taper, butterworth_filter, resample_array
+
+# Function to plot scatter points
+def plot_scatter(ax, points, probs, offset, colors):
+    eq_probs, exp_probs, no_probs, su_probs = probs.T
+    ax.scatter(points, eq_probs + offset, c=colors[0], ec='k')
+    ax.scatter(points, exp_probs + offset, c=colors[1], ec='k')
+    ax.scatter(points, no_probs + offset, c=colors[2], ec='k')
+    ax.scatter(points, su_probs + offset, c=colors[3], ec='k')
+
+# Main function to plot probabilities
+def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size = (20, 15)):
+    signal_length = end_time - start_time
+    fig, ax = plt.subplots(2, 3, figsize=fig_size, sharey=True, sharex=False)
+
+    legend_elements = [
+        mlines.Line2D([], [], marker='o', color='#FF0000', mec='k', label='Prob (Eq)', markersize=8),
+        mlines.Line2D([], [], marker='o', color='green', mec='k', label='Prob (Exp)', markersize=8),
+        mlines.Line2D([], [], marker='o', color='blue', mec='k', label='Prob (Su)', markersize=8)
+    ]
+
+    data = np.array(big_reshaped_data)[:, 0, 2, :]
+    data = np.array(butterworth_filter(data, 0.5, 15, orig_sr, 4, 'bandpass'))
+
+    for i in range(len(data)):
+        time = np.linspace(0, signal_length, len(data[i]))
+
+        for col, (model_probs, model_title) in enumerate(stn_probs_dl):
+            ax[0, col].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            model_probs = np.array(model_probs).reshape(len(data), -1, 4)
+            sample_probs = model_probs[i]
+            points = np.linspace(0, signal_length - 100, sample_probs.shape[0]) + 50
+            plot_scatter(ax[0, col], points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
+            avg_probs = np.mean(model_probs, axis=0)
+            plot_scatter(ax[0, col], points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
+            ax[0, col].set_xlim(0, signal_length)
+            max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
+            ax[0, col].set_title(f'{model_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
+
+        for row, (ml_probs, ml_title, window_size) in enumerate(stn_probs_ml):
+            sample_probs = np.squeeze(np.array(ml_probs))
+            points = np.linspace(0, signal_length - window_size, sample_probs[i].shape[0]) + window_size / 2
+            ax[1, row].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            model_probs = np.array(ml_probs).reshape(len(data), -1, 4)
+            sample_probs = model_probs[i]
+            plot_scatter(ax[1, row], points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
+            avg_probs = np.mean(model_probs, axis=0)
+            plot_scatter(ax[1, row], points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
+            ax[1, row].set_xlim(0, signal_length)
+            max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
+            ax[1, row].set_title(f'{ml_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
+
+    ax[-1, -1].legend(handles=legend_elements, loc='upper left', fontsize=8)
+    plt.yticks(np.arange(0, 2 * len(data), 2), np.array(big_station_ids).reshape(len(data), 3)[:, 2])
+    fig.suptitle('time since '+str(start_time), y=0.99)
+    fig.tight_layout()
+    plt.show()
+
+
+
+# Main function to plot probabilities
+def plot_single_model_probs(stn_probs,  big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size = (10, 15)):
+    signal_length = end_time - start_time
+    fig, ax = plt.subplots(1, 1, figsize=fig_size, sharey=True, sharex=False)
+
+    legend_elements = [
+        mlines.Line2D([], [], marker='o', color='#FF0000', mec='k', label='Prob (Eq)', markersize=8),
+        mlines.Line2D([], [], marker='o', color='green', mec='k', label='Prob (Exp)', markersize=8),
+        mlines.Line2D([], [], marker='o', color='blue', mec='k', label='Prob (Su)', markersize=8)
+    ]
+
+    data = np.array(big_reshaped_data)[:, 0, 2, :]
+    data = np.array(butterworth_filter(data, 0.5, 15, orig_sr, 4, 'bandpass'))
+
+    for i in range(len(data)):
+        time = np.linspace(0, signal_length, len(data[i]))
+
+
+        for row, (ml_probs, ml_title, window_size) in enumerate(stn_probs):
+            sample_probs = np.squeeze(np.array(ml_probs))
+            points = np.linspace(0, signal_length - window_size, sample_probs[i].shape[0]) + window_size / 2
+            ax.plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            model_probs = np.array(ml_probs).reshape(len(data), -1, 4)
+            sample_probs = model_probs[i]
+            plot_scatter(ax, points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
+            avg_probs = np.mean(model_probs, axis=0)
+            plot_scatter(ax, points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
+            ax.set_xlim(0, signal_length)
+            max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
+            ax.set_title(f'{ml_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
+
+    ax.legend(handles=legend_elements, loc='upper left', fontsize=8)
+    plt.yticks(np.arange(0, 2 * len(data), 2), np.array(big_station_ids).reshape(len(data), 3)[:, 2])
+    fig.suptitle('time since'+str(start_time), y=0.99)
+    fig.tight_layout()
+    plt.show()
+
     
 
