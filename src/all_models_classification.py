@@ -1,57 +1,38 @@
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import h5py
-import obspy
-# from tqdm import tqdm
-from glob import glob
-# import time
-import random
 import os
 import sys
+import random
+from glob import glob
 from datetime import datetime
-from tqdm import tqdm
 
-from scipy import stats,signal
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import lines as mlines
 
+import h5py
+import obspy
+from obspy import UTCDateTime, Stream
+from obspy.clients.fdsn import Client
+
+from scipy import stats, signal
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import random_split
-import torchvision.transforms as transforms
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
-# from sklearn.preprocessing import MinMaxScaler
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
+import torchvision.transforms as transforms
 
+from tqdm import tqdm
+from joblib import dump, load
 
-import numpy as np
-import scipy.signal as signal
-
-from matplotlib import lines as mlines
-
-import sys
 sys.path.append('../src')
 from utils import apply_cosine_taper, butterworth_filter, resample_array
 
 
-import numpy as np
-import torch
-import torch.nn.functional as F
-from obspy import UTCDateTime, Stream
-from obspy.clients.fdsn import Client
-from scipy import signal
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-
-
-from joblib import dump, load
-
-
-import os
 # Specify the directory containing the module
 module_path = os.path.abspath(os.path.join('..', 'src'))
+import matplotlib.lines as mlines
 
 # Add the directory to sys.path
 if module_path not in sys.path:
@@ -60,80 +41,64 @@ if module_path not in sys.path:
 import seis_feature
 from utils import apply_cosine_taper, butterworth_filter, resample_array
  
+#----------------------------
 
-from deep_learning_architectures import MyCNN_1d
-from deep_learning_architectures import MyCNN_2d
-from deep_learning_architectures import SeismicCNN_2d
-from deep_learning_architectures import MyResCNN2D
+# Device Configuration
+device = torch.device("cpu")  # Set computation device to CPU
 
+# Model Parameters
+num_channels = 3  # Number of input channels
+dropout = 0.9  # Dropout rate for regularization
+model = []  # Placeholder for model storage
+one_d = False  # Flag for 1D data processing
 
-## setting up some important parameters (not to be changed)
-num_channels = 3
-dropout = 0.9
-# Check if a GPU is available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Seismic Data Parameters
+client = Client("IRIS")  # Initialize FDSN client (e.g., IRIS)
+stations_id = ['CC.WOW', 'CC.TAVI', 'CC.GNOB', 'CC.ARAT', 'CC.TABR', 'UW.RER']  # Station IDs
+location = "*"  # Consider all available locations
+channel_patterns = ["EH", "BH", "HH"]  # Channel types to consider
 
+# Time Parameters
+start_time = obspy.UTCDateTime(2024, 8, 15, 17, 39, 52)  # Start time of data retrieval
+end_time = start_time + 300  # End time (300 seconds later)
+signal_length = end_time - start_time  # Total duration of the signal
 
+# Sampling Parameters
+orig_sr = 100  # Original sampling rate (Hz)
+new_sr = 50  # Resampled rate (Hz)
+os = orig_sr  # Alias for original sampling rate
+fs = new_sr  # Alias for new sampling rate
+stride = 10 * os  # Stride length for windowing
+window_length = 100  # Window length for processing
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Initialize FDSN client (e.g., IRIS)
-client = Client("IRIS")
-
-stations_id = ['CC.WOW', 'CC.TAVI',  'CC.GNOB', 'CC.ARAT', 'CC.TABR', 'UW.RER']
-
-
-## taking all the available location
-location = "*"
-
-# starttime 
-start_time = obspy.UTCDateTime(2024, 8, 15, 17, 39, 52) - 0
-
-# endtime
-end_time = start_time + 300
-
-# length
-signal_length = end_time - start_time
-
-# channel_patterns
-channel_patterns = ["EH", "BH", "HH"]
-
-os = 100 # original sampling rate
-fs = 50 # new sampling rate
-stride = 10*(os)
-window_length = 100
-model = []
-one_d = False
+# Filtering Parameters
+lowpass = 1  # Low-pass filter cutoff frequency (Hz)
+highpass = 20  # High-pass filter cutoff frequency (Hz)
 
 
-lowpass = 1
-highpass = 20
-orig_sr = 100
-new_sr = 50
-
-
+##---functions--start---here----##
 
 
 def get_station_inventory(network, station, location, start_time, end_time, client):
     """
-    Fetch station inventory data from FDSN client.
+    Fetches station inventory data from the FDSN client.
+
+    Parameters:
+    - network (str): Seismic network code.
+    - station (str): Station code.
+    - location (str): Location identifier (wildcard '*' for all locations).
+    - start_time (UTCDateTime): Start time for data retrieval.
+    - end_time (UTCDateTime): End time for data retrieval.
+    - client (Client): FDSN client instance.
+
+    Returns:
+    - inventory (Inventory or None): Inventory object if successful, None if an error occurs.
     """
     try:
-        inventory = client.get_stations(network=network, station=station, location=location,
-                                        channel="*H*", starttime=start_time, endtime=end_time, level="channel")
+        inventory = client.get_stations(
+            network=network, station=station, location=location,
+            channel="*H*", starttime=start_time, endtime=end_time, level="channel"
+        )
         return inventory
     except Exception as e:
         print(f"Error fetching station data for {station}: {e}")
@@ -142,19 +107,40 @@ def get_station_inventory(network, station, location, start_time, end_time, clie
 
 def has_three_components(station, prefix):
     """
-    Check if a station has all three components (E, N, Z) for a given channel prefix.
+    Checks if a station has all three components (E, N, Z) for a given channel prefix.
+
+    Parameters:
+    - station (Station): Station object from the inventory.
+    - prefix (str): Channel prefix (e.g., 'EH', 'BH', 'HH').
+
+    Returns:
+    - bool: True if all three components (E, N, Z) exist, otherwise False.
     """
-    channels = [chan.code for chan in station.channels if chan.code.startswith(prefix)]
-    return set([f"{prefix}E", f"{prefix}N", f"{prefix}Z"]).issubset(set(channels))
+    channels = {chan.code for chan in station.channels if chan.code.startswith(prefix)}
+    return {f"{prefix}E", f"{prefix}N", f"{prefix}Z"}.issubset(channels)
 
 
 def fetch_waveform_data(client, network, station, location, prefix, start_time, end_time):
     """
-    Fetch waveform data from the client for a station with the given channel prefix.
+    Retrieves waveform data from the FDSN client for a given station and channel prefix.
+
+    Parameters:
+    - client (Client): FDSN client instance.
+    - network (str): Seismic network code.
+    - station (str): Station code.
+    - location (str): Location identifier.
+    - prefix (str): Channel prefix (e.g., 'EH', 'BH', 'HH').
+    - start_time (UTCDateTime): Start time for data retrieval.
+    - end_time (UTCDateTime): End time for data retrieval.
+
+    Returns:
+    - Stream: Waveform data stream (empty if retrieval fails).
     """
     try:
-        st = client.get_waveforms(network=network, station=station, location=location,
-                                  channel=f"{prefix}?", starttime=start_time, endtime=end_time)
+        st = client.get_waveforms(
+            network=network, station=station, location=location,
+            channel=f"{prefix}?", starttime=start_time, endtime=end_time
+        )
         return st
     except Exception as e:
         print(f"Error fetching waveform data for {station}: {e}")
@@ -163,7 +149,20 @@ def fetch_waveform_data(client, network, station, location, prefix, start_time, 
 
 def process_station(network, station, location, start_time, end_time, channel_patterns, client, plot_data=False):
     """
-    Process the station to fetch waveform data and return the combined stream.
+    Processes a seismic station by fetching available waveform data.
+
+    Parameters:
+    - network (str): Seismic network code.
+    - station (str): Station code.
+    - location (str): Location identifier.
+    - start_time (UTCDateTime): Start time for data retrieval.
+    - end_time (UTCDateTime): End time for data retrieval.
+    - channel_patterns (list): List of channel prefixes to check (e.g., ['EH', 'BH', 'HH']).
+    - client (Client): FDSN client instance.
+    - plot_data (bool, optional): If True, plots the retrieved waveforms.
+
+    Returns:
+    - Stream: Combined waveform data stream for the station.
     """
     inventory = get_station_inventory(network, station, location, start_time, end_time, client)
     if inventory is None:
@@ -173,91 +172,132 @@ def process_station(network, station, location, start_time, end_time, channel_pa
     for net in inventory:
         for sta in net:
             for prefix in channel_patterns:
-                # checks if it has all three components for a given channel prefix, if not it will move to other.
                 if has_three_components(sta, prefix):
-                    #print(f"Station {sta.code} has all 3 components for {prefix} channels.")
                     st = fetch_waveform_data(client, net.code, sta.code, location, prefix, start_time, end_time)
                     st_big += st
                     if plot_data:
                         st.plot()
-                    break  # Exit loop after finding one valid channel pattern
+                    break  # Stop after finding one valid channel prefix
 
     return Stream(st_big)
 
 
-def taper_and_bandpass_filter(data, lowcut= lowpass, highcut= highpass, fs= orig_sr):
+def taper_and_bandpass_filter(data, lowcut, highcut, fs):
     """
-    Apply a bandpass filter to the input data.
+    Applies a bandpass filter and a taper window to the input seismic data.
+
+    Parameters:
+    - data (numpy.ndarray): Input waveform data.
+    - lowcut (float): Low-pass filter cutoff frequency (Hz).
+    - highcut (float): High-pass filter cutoff frequency (Hz).
+    - fs (int): Sampling frequency (Hz).
+
+    Returns:
+    - numpy.ndarray: Filtered waveform data.
     """
     nyquist = 0.5 * fs
     low = lowcut / nyquist
     high = highcut / nyquist
     b, a = signal.butter(4, [low, high], btype='band')
-    
-    # Apply taper and filter
+
+    # Apply Tukey window taper
     taper = signal.windows.tukey(data.shape[-1], alpha=0.1)
     data = np.array([np.multiply(taper, row) for row in data])
+
+    # Apply bandpass filter
     data = np.array([signal.filtfilt(b, a, row) for row in data])
-    
+
     return data
 
 
 def reshape_and_resample(st, signal_length, fs=100):
     """
-    Detrend, resample, and reshape the data for each station.
+    Detrends, resamples, and reshapes seismic waveform data.
+
+    Parameters:
+    - st (numpy.ndarray): Input waveform data.
+    - signal_length (float): Duration of the signal (seconds).
+    - fs (int, optional): Target sampling frequency (Hz). Default is 100 Hz.
+
+    Returns:
+    - numpy.ndarray: Resampled and reshaped waveform data.
     """
-    st.detrend(type = 'linear')
-    st = np.array([signal.resample(row, int(signal_length*fs)) for row in st])
-    
-    reshaped_data = np.array(st).reshape(len(st) // 3, 3, -1)[0].reshape(1,3,-1)
+    st.detrend(type='linear')
+    st = np.array([signal.resample(row, int(signal_length * fs)) for row in st])
+
+    reshaped_data = np.array(st).reshape(len(st) // 3, 3, -1)[0].reshape(1, 3, -1)
     return reshaped_data
 
 
+def extract_spectrograms(waveforms, fs, nperseg=256, overlap=0.5):
+    """
+    Computes spectrograms from input waveform data.
 
-def extract_spectrograms(waveforms = [], fs = new_sr, nperseg=256, overlap=0.5):
-    noverlap = int(nperseg * overlap)  # Calculate overlap
+    Parameters:
+    - waveforms (numpy.ndarray): Input waveform data of shape (batch, channels, time).
+    - fs (int): Sampling frequency (Hz).
+    - nperseg (int, optional): Length of each FFT segment. Default is 256.
+    - overlap (float, optional): Fraction of segment overlap. Default is 0.5.
 
-    # Example of how to get the shape of one spectrogram
+    Returns:
+    - numpy.ndarray: Spectrogram data of shape (batch, channels, frequencies, time_segments).
+    """
+    noverlap = int(nperseg * overlap)  # Compute overlap in samples
+
+    # Compute shape of one spectrogram to initialize array
     f, t, Sxx = signal.spectrogram(waveforms[0, 0], nperseg=nperseg, noverlap=noverlap, fs=fs)
 
-    # Initialize an array of zeros with the shape: (number of waveforms, channels, frequencies, time_segments)
+    # Initialize array to store spectrograms
     spectrograms = np.zeros((waveforms.shape[0], waveforms.shape[1], len(f), len(t)))
 
-    for i in range(waveforms.shape[0]):  # For each waveform
-        for j in range(waveforms.shape[1]):  # For each channel
+    # Compute spectrograms for each waveform and channel
+    for i in range(waveforms.shape[0]):  # Iterate over waveforms
+        for j in range(waveforms.shape[1]):  # Iterate over channels
             _, _, Sxx = signal.spectrogram(waveforms[i, j], nperseg=nperseg, noverlap=noverlap, fs=fs)
-            spectrograms[i, j] = Sxx  # Fill the pre-initialized array
+            spectrograms[i, j] = Sxx  # Store computed spectrogram
 
-    #print(spectrograms.shape)
     return spectrograms
 
 
 
 
-def compute_window_probs(stations_id = stations_id, location = location, start_time = start_time, 
-                        end_time = end_time, channel_patterns = channel_patterns, client = client,
-                        orig_sr = orig_sr, new_sr = new_sr, window_length = window_length, lowpass = lowpass, stride = stride, 
-                        highpass = highpass, one_d = one_d, model = model, model_type = 'dl', filename = 'P_10_30_F_05_15_50'):
+def compute_window_probs(
+    stations_id, location, start_time, end_time, channel_patterns, client,
+    orig_sr, new_sr, window_length, lowpass, stride, highpass, one_d,
+    model, model_type='dl', filename='P_10_30_F_05_15_50'
+):
+    """
+    Computes probability outputs for seismic stations using deep learning (DL) or machine learning (ML) models.
 
-    big_station_wise_probs = []
-    big_reshaped_data = []
-    big_station_ids = []
+    Parameters:
+    - stations_id (list): List of station IDs in 'NET.STA' format.
+    - location (str): Location identifier.
+    - start_time (UTCDateTime): Start time for waveform data.
+    - end_time (UTCDateTime): End time for waveform data.
+    - channel_patterns (list): List of channel prefixes to check (e.g., ['EH', 'BH', 'HH']).
+    - client (Client): FDSN client instance.
+    - orig_sr (int): Original sampling rate (Hz).
+    - new_sr (int): New sampling rate (Hz) after resampling.
+    - window_length (int): Window length in seconds.
+    - lowpass (float): Low-pass filter cutoff frequency (Hz).
+    - stride (int): Stride length in samples.
+    - highpass (float): High-pass filter cutoff frequency (Hz).
+    - one_d (bool): If True, uses a 1D model instead of spectrogram-based input.
+    - model (PyTorch model or ML model): Trained model for classification.
+    - model_type (str, optional): 'dl' for deep learning, 'ml' for machine learning. Defaults to 'dl'.
+    - filename (str, optional): File identifier for model-related parameters. Defaults to 'P_10_30_F_05_15_50'.
+
+    Returns:
+    - big_station_wise_probs (list): Probability outputs for each station.
+    - big_reshaped_data (list): Reshaped and processed waveform data.
+    - big_station_ids (list): List of station IDs corresponding to the data.
+    """
+    big_station_wise_probs, big_reshaped_data, big_station_ids = [], [], []
     signal_length = end_time - start_time
-    
-    # Main processing loop for stations
+
     for stn_id in tqdm(stations_id):
-
-        ## extract the network and the stations UW.STAR --> UW, STAR
         network, station = stn_id.split('.')
-
-
-
-
-        # preallocating array saves computation time wherever possible. 
         station_ids = []
-
-
-        ## it will gather all the three component data for the stations if they are available. 
         sample_st = process_station(network, station, location, start_time, end_time, channel_patterns, client)
 
         if len(sample_st) == 0:
@@ -265,49 +305,28 @@ def compute_window_probs(stations_id = stations_id, location = location, start_t
             continue
 
         try:
-            # reshaped data now is an array that has undergone linear detrending, and resampling to 100 Hz. 
-            # we are trying to do the same processing to this data as was done to the data that neural networks was trained on. 
-            # the shape of reshaped data would be (no. of types of sensors in a given station, 3, signal_length)
-            reshaped_data = reshape_and_resample(sample_st, signal_length, fs = orig_sr)
-
-
-            # this is storing the ids. (e.g., NET..STA.BHZ)
+            reshaped_data = reshape_and_resample(sample_st, signal_length, fs=orig_sr)
             station_ids.append([sample_st[i].id for i in range(len(sample_st))][:3])
             print("Reshaped data:", reshaped_data.shape)
-
-
         except ValueError as e:
             print(f"Unable to reshape data for station {station}. Error: {e}")
             continue
 
+        station_wise_outputs, station_wise_probs = [], []
 
-
-        station_wise_outputs = []
-        station_wise_probs = []
-
-
-        # reshaped_data is of the shape (no. of stations/types of sensors present, no. of channels, signal_length)
         for station in reshaped_data:
             windowed_data = []
             
             if model_type == 'dl':
-                for i in range(0, int((signal_length*orig_sr) - (window_length * orig_sr)), stride):
+                for i in range(0, int((signal_length * orig_sr) - (window_length * orig_sr)), stride):
                     input_data = station[:, i:i + window_length * orig_sr]
-
-                    # applying the taper and filtering
-                    filtered_signal = taper_and_bandpass_filter(input_data, lowcut= lowpass, highcut= highpass, fs= orig_sr)
-
-                    # normalizing by standard deviation as done in the training dataset. 
-                    filtered_signal = filtered_signal/np.std(np.abs(filtered_signal))          
-                    windowed_data.append(np.array([signal.resample(row, int(window_length*new_sr)) for row in filtered_signal]))
-
-                # spectrogram expects an input of shape (number of windows, number of channels, number of samples)
-                spectrograms = extract_spectrograms(waveforms = np.array(windowed_data))
-
-                # this is the input that goes into neural network model. 
+                    filtered_signal = taper_and_bandpass_filter(input_data, lowcut=lowpass, highcut=highpass, fs=orig_sr)
+                    filtered_signal /= np.std(np.abs(filtered_signal))  # Normalize by standard deviation
+                    windowed_data.append(np.array([signal.resample(row, int(window_length * new_sr)) for row in filtered_signal]))
+                
+                spectrograms = extract_spectrograms(waveforms=np.array(windowed_data), fs = new_sr)
                 a = torch.Tensor(spectrograms).to(device)
 
-                # if we are testing one-D model
                 if one_d:
                     a = torch.Tensor(np.array(windowed_data)).to(device)
 
@@ -316,29 +335,19 @@ def compute_window_probs(stations_id = stations_id, location = location, start_t
                     softmax_probs = F.softmax(output, dim=1).cpu().numpy()
 
                 station_wise_outputs.append(output)
-                station_wise_probs.append(softmax_probs)       
-
+                station_wise_probs.append(softmax_probs)
             
             elif model_type == 'ml':
-                
-                scaler_params = pd.read_csv('scaler_params_phy_man_'+filename+'.csv')
-                best_model = load('best_rf_model_all_features_phy_man_'+filename+'.joblib')
-                
-                
-                if int(filename.split('_')[4]) != 1:
-                    lowpass = int(filename.split('_')[4])/10
-                    
-                else:
-                    lowpass = int(filename.split('_')[4])
-                    
+                scaler_params = pd.read_csv(f'scaler_params_phy_man_{filename}.csv')
+                best_model = load(f'best_rf_model_all_features_phy_man_{filename}.joblib')
+
+                lowpass = int(filename.split('_')[4]) / 10 if int(filename.split('_')[4]) != 1 else int(filename.split('_')[4])
                 highpass = int(filename.split('_')[5])
+                window_length = int(filename.split('_')[1]) + int(filename.split('_')[2])
                 
-                window_length = int(filename.split('_')[1])+int(filename.split('_')[2])
-                
-                for i in range(0, int((signal_length*orig_sr) - (window_length * orig_sr)), stride):
-                    
+                for i in range(0, int((signal_length * orig_sr) - (window_length * orig_sr)), stride):
                     input_data = np.array([station[2, i:i + window_length * orig_sr]])
-                    tapered = apply_cosine_taper(input_data, 10)      
+                    tapered = apply_cosine_taper(input_data, 10)
                     filtered_data = np.array(butterworth_filter(tapered, lowpass, highpass, orig_sr, 4, 'bandpass'))
                     normalized_data = filtered_data / np.max(abs(filtered_data), axis=1)[:, np.newaxis]
                     resampled_data = np.array([resample_array(arr, orig_sr, new_sr) for arr in normalized_data])[0]
@@ -347,216 +356,68 @@ def compute_window_probs(stations_id = stations_id, location = location, start_t
                 for i in range(len(windowed_data)):
                     try:
                         columns = scaler_params['Feature'].values
-
                         scaler_params.index = columns
+                        physical_features = seis_feature.FeatureCalculator(windowed_data[i], fs=new_sr, selected_features=columns).compute_features()
+                        features = physical_features.loc[:, columns]
 
-                        physical_features = seis_feature.FeatureCalculator(windowed_data[i], fs=new_sr, selected_features = columns).compute_features()
-                        final_features =  physical_features            #pd.concat([tsfel_features, physical_features], axis=1)
-                        #columns = scaler_params['Feature'].values
-                        features = final_features.loc[:, columns]
-
-                        # Scale features
                         for j in range(len(columns)):
-                            features[columns[j]] = (features[columns[j]] - scaler_params.loc[columns[j],'Mean'])/scaler_params.loc[columns[j], 'Std Dev']
-
-                        # Add time features
+                            features[columns[j]] = (features[columns[j]] - scaler_params.loc[columns[j],'Mean']) / scaler_params.loc[columns[j], 'Std Dev']
+                        
                         if len(columns) < 30:
-                            features['hod'] = (start_time).hour - 8
+                            features['hour_of_day'] = start_time.hour - 8
                         else:
-                            features['hod'] = (start_time).hour - 8
-                            features['dow'] = (start_time).weekday
-                            features['moy'] = (start_time).month
-
-                        # Predict results
-                        #best_model.predict(features)
+                            features['hour_of_day'] = start_time.hour - 8
+                            features['day_of_week'] = start_time.weekday
+                            features['month_of_year'] = start_time.month
+                        
                         station_wise_probs.append(best_model.predict_proba(features))
                     except:
                         station_wise_probs.append(np.array([[0, 0, 0, 0]]))
             
-            
-            
-
         big_station_wise_probs.append(station_wise_probs)
         big_reshaped_data.append(reshaped_data)
         big_station_ids.append(station_ids)
-
-        
+    
     return big_station_wise_probs, big_reshaped_data, big_station_ids
 
 
 
 
-
-
-def plot_z_component_with_probs(z_data, fs, window_size, softmax_probs, station_names, lowpass = lowpass, highpass = highpass, signal_length = signal_length,  model_name = 'ML P_10_30_F_05_15_50'):
-    """
-    Plot Z component data with softmax probabilities.
-    
-    input arguments
-    z_data: is the Z component data of all the available stations, it will have a shape of (n_stns, signal_length*orig_sr)
-    (note that z_data is sampled in original sampling rate)
-    
-    fs = sampling rate in which the data is sampled originally
-    
-    window_size = size of the window for which model is computing the results. 
-    
-    station_names = the stations ids of each of the participating station. 
-    
-    softmax_probs: after squeezing, it should be of the shape (n_stns, n_windows, n_classes)
-    lowpass: lower frequency limit of a bandpass filter for the display purpose
-    highpass: higher frequency limit of a bandpass filter for the display purpose
-    
-    
-    
-    """
-
-    softmax_probs = np.squeeze(softmax_probs)
-    
-    lowcut, highcut = lowpass, highpass
-    nyquist = 0.5 * fs
-    b, a = signal.butter(4, [lowcut / nyquist, highcut / nyquist], btype='band')
-    
-    # filtering the Z data for display purpose
-    z_data = signal.filtfilt(b, a, z_data / np.max(np.abs(z_data), axis=1, keepdims=True))
-    
-    # normalizing the filtered Z data for display  purpose. 
-    z_data = z_data / np.max(np.abs(z_data), axis=1, keepdims=True)
-    
-    # defining the time variable. 
-    time = np.linspace(0, z_data.shape[-1] / fs, z_data.shape[-1])
-
-    fig, ax = plt.subplots(nrows=len(z_data)+1, ncols=1, figsize=[10, 1.5 * len(z_data)+ 1.5], sharex=True)
-    ax = [ax] if len(z_data) == 1 else ax
-
-    
-    for i, station_data in enumerate(z_data):
-        ax[i].plot(time, station_data, label="Z Component")
-
-        points = np.linspace(0, int((signal_length) - (window_size)), max(softmax_probs[i].shape)) + window_size / 2
-
-        eq_probs, exp_probs, no_probs, su_probs = np.squeeze(softmax_probs[i].T)
-   
-  
-        ax[i].scatter(points, eq_probs, c='k', label='Prob(Eq)', zorder=1, ec= 'k')
-        ax[i].scatter(points, exp_probs, c='blue', label='Prob(Exp)', zorder=1, ec = 'k')
-        ax[i].scatter(points, su_probs, c='red', label='Prob(Su)', zorder=1, ec = 'k')
-        ax[i].scatter(points, no_probs, c='white', label='Prob(No)', zorder=1, ec = 'k')
-
-        ax[i].set_title(f"Station ID: {station_names[i]}")
-        ax[i].set_ylabel("Amplitude")
-        ax[i].set_xlim(0, int((signal_length)))
-    
-    
-        ax[-1].set_title("Mean Probabilities")
-        ax[-1].scatter(points, np.mean(softmax_probs, axis = 0)[:,0],  c='k',  zorder=1, ec= 'k')
-        ax[-1].scatter(points, np.mean(softmax_probs, axis = 0)[:,1],  c='blue',  zorder=1, ec= 'k')
-        ax[-1].scatter(points, np.mean(softmax_probs, axis = 0)[:,2],  c='white',  zorder=1, ec= 'k')
-        ax[-1].scatter(points, np.mean(softmax_probs, axis = 0)[:,3],  c= 'red',  zorder=1, ec= 'k')
- 
-        
-            # Create custom legend for circular markers
-        legend_elements = [
-           mlines.Line2D([], [], marker='o', color='red', mec = 'k', label='Prob (Su)', markersize= 8),
-            mlines.Line2D([], [], marker='o', color='k', mec = 'k', label='Prob (Eq)', markersize= 8), 
-            mlines.Line2D([], [], marker='o', color='white', mec = 'k',  label='Prob (No)', markersize= 8),
-             mlines.Line2D([], [], marker='o', color='blue', mec = 'k',  label='Prob (Exp)', markersize= 8)
-        ]
-        ax[-1].legend(handles=legend_elements, loc='upper right', fontsize= 8)
-
-    plt.xlabel("Time (s)")
-    fig.suptitle(model_name)
-  
-    plt.tight_layout()
-    plt.show()
-    
-    
-    
-
-def plot_all_model_predictions(fig_size, signal_length, big_reshaped_data, stn_probs_dl, stn_probs_ml, big_station_ids, start_time, orig_sr):
-    # Create subplots
-    fig, ax = plt.subplots(2, 4, figsize=fig_size, sharey=True, sharex=False)
-
-    # Process data
-    data = np.squeeze(np.array(big_reshaped_data))[:, 2, :]
-    data = np.array(butterworth_filter(data, 0.5, 15, orig_sr, 4, 'bandpass'))
-
-    # Function to plot scatter points
-    def plot_scatter(ax, points, probs, offset, colors):
-        eq_probs, exp_probs, no_probs, su_probs = probs.T
-        ax.scatter(points, eq_probs + offset, c=colors[0], ec='k')
-        ax.scatter(points, exp_probs + offset, c=colors[1], ec='k')
-        ax.scatter(points, no_probs + offset, c=colors[2], ec='k')
-        ax.scatter(points, su_probs + offset, c=colors[3], ec='k')
-
-    # Iterate through the data and plot DL model results
-    for i in range(len(data)):
-        time = np.linspace(0, signal_length, len(data[i]))
-
-        for col, (model_probs, model_title) in enumerate(stn_probs_dl):
-            ax[0, col].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='#1f77b4')
-            sample_probs = np.squeeze(np.array(model_probs))[i]
-            points = np.linspace(0, signal_length - 100, sample_probs.shape[0]) + 50  # Window size of 100
-
-            # Plot individual sample probabilities
-            plot_scatter(ax[0, col], points, sample_probs, 2 * i, ['k', 'b', 'white', 'r'])
-
-            # Plot averaged probabilities
-            avg_probs = np.mean(np.squeeze(np.array(model_probs)), axis=0)
-            plot_scatter(ax[0, col], points, avg_probs, -2, ['k', 'b', 'white', 'r'])
-
-            ax[0, col].set_xlim(0, signal_length)
-
-            # Set title with max probabilities
-            max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(np.squeeze(model_probs), axis=0), axis=0).astype('float'), 1)
-            ax[0, col].set_title(f'{model_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
-
-    # Plot ML model results
-    for row, (ml_probs, ml_title, window_size) in enumerate(stn_probs_ml):
-        sample_probs = np.squeeze(np.array(ml_probs))
-
-        for i in range(len(data)):
-            points = np.linspace(0, signal_length - window_size, sample_probs[i].shape[0]) + window_size / 2
-            ax[1, row].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='#1f77b4')
-            plot_scatter(ax[1, row], points, sample_probs[i], 2 * i, ['k', 'b', 'white', 'r'])
-
-            avg_probs = np.mean(sample_probs, axis=0)
-            plot_scatter(ax[1, row], points, avg_probs, -2, ['k', 'b', 'white', 'r'])
-
-            ax[1, row].set_xlim(0, signal_length)
-
-        max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(np.squeeze(ml_probs), axis=0), axis=0).astype('float'), 1)
-        ax[1, row].set_title(f'{ml_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
-
-    # Hide last subplot (1, 3)
-    ax[1, 3].axis('off')
-
-    # Set station labels and layout adjustments
-    plt.yticks(np.arange(0, 2 * len(data), 2), np.squeeze(big_station_ids)[:, 2])
-    fig.suptitle(str(start_time), y=0.99)
-    fig.tight_layout()
-    plt.show()
-    
-
-    
-    
-
-
-
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-from utils import apply_cosine_taper, butterworth_filter, resample_array
-
 # Function to plot scatter points
 def plot_scatter(ax, points, probs, offset, colors):
+    """
+    Plots scatter points for different probability classes.
+    
+    Parameters:
+        ax (matplotlib.axes.Axes): Axis to plot on.
+        points (array-like): X-coordinates of scatter points.
+        probs (array-like): Probabilities for different classes.
+        offset (float): Offset for y-coordinates.
+        colors (list): Colors for different probability classes.
+    """
     eq_probs, exp_probs, no_probs, su_probs = probs.T
     ax.scatter(points, eq_probs + offset, c=colors[0], ec='k')
     ax.scatter(points, exp_probs + offset, c=colors[1], ec='k')
     ax.scatter(points, no_probs + offset, c=colors[2], ec='k')
     ax.scatter(points, su_probs + offset, c=colors[3], ec='k')
 
-# Main function to plot probabilities
-def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size = (20, 15)):
+
+    
+# Function to plot probabilities from multiple models
+def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size=(20, 15)):
+    """
+    Plots probability outputs from deep learning and machine learning models.
+    
+    Parameters:
+        stn_probs_dl (list): Deep learning model probabilities.
+        stn_probs_ml (list): Machine learning model probabilities.
+        big_reshaped_data (array-like): Seismic waveform data.
+        orig_sr (float): Original sampling rate.
+        start_time (datetime): Start time of the signal.
+        end_time (datetime): End time of the signal.
+        big_station_ids (list): Station IDs.
+        fig_size (tuple): Figure size.
+    """
     signal_length = end_time - start_time
     fig, ax = plt.subplots(2, 3, figsize=fig_size, sharey=True, sharex=False)
 
@@ -567,80 +428,101 @@ def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr,
     ]
 
     data = np.array(big_reshaped_data)[:, 0, 2, :]
-    data = np.array(butterworth_filter(data, 0.5, 15, orig_sr, 4, 'bandpass'))
+    data = butterworth_filter(data, 0.5, 15, orig_sr)
 
     for i in range(len(data)):
         time = np.linspace(0, signal_length, len(data[i]))
 
         for col, (model_probs, model_title) in enumerate(stn_probs_dl):
-            ax[0, col].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            ax[0, col].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, alpha=0.5)
             model_probs = np.array(model_probs).reshape(len(data), -1, 4)
             sample_probs = model_probs[i]
-            points = np.linspace(0, signal_length - 100, sample_probs.shape[0]) + 50
+            points = np.linspace(0, signal_length - 100, sample_probs.shape[0]) + 0
             plot_scatter(ax[0, col], points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
             avg_probs = np.mean(model_probs, axis=0)
             plot_scatter(ax[0, col], points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
             ax[0, col].set_xlim(0, signal_length)
             max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
             ax[0, col].set_title(f'{model_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
+            
 
         for row, (ml_probs, ml_title, window_size) in enumerate(stn_probs_ml):
             sample_probs = np.squeeze(np.array(ml_probs))
             points = np.linspace(0, signal_length - window_size, sample_probs[i].shape[0]) + window_size / 2
-            ax[1, row].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            ax[1, row].plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, alpha=0.5)
             model_probs = np.array(ml_probs).reshape(len(data), -1, 4)
             sample_probs = model_probs[i]
             plot_scatter(ax[1, row], points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
             avg_probs = np.mean(model_probs, axis=0)
             plot_scatter(ax[1, row], points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
             ax[1, row].set_xlim(0, signal_length)
+            ax[1, row].set_title(f'{ml_title}')
             max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
             ax[1, row].set_title(f'{ml_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
 
     ax[-1, -1].legend(handles=legend_elements, loc='upper left', fontsize=8)
     plt.yticks(np.arange(0, 2 * len(data), 2), np.array(big_station_ids).reshape(len(data), 3)[:, 2])
-    fig.suptitle('time since '+str(start_time), y=0.99)
+    fig.suptitle('Time since ' + str(start_time), y=0.99)
     fig.tight_layout()
     plt.show()
 
 
 
-# Main function to plot probabilities
-def plot_single_model_probs(stn_probs,  big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size = (10, 15)):
-    signal_length = end_time - start_time
-    fig, ax = plt.subplots(1, 1, figsize=fig_size, sharey=True, sharex=False)
 
+def plot_single_model_probs(stn_probs, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size=(10, 15)):
+    """
+    Plots probability distributions for a single model over time across multiple stations.
+    
+    Parameters:
+    - stn_probs: List of tuples containing probability data, model title, and window size.
+    - big_reshaped_data: Numpy array of reshaped seismic waveform data.
+    - orig_sr: Original sampling rate of the waveform.
+    - start_time: Start time of the signal.
+    - end_time: End time of the signal.
+    - big_station_ids: List of station IDs corresponding to the data.
+    - fig_size: Tuple specifying figure size (default is (10, 15)).
+    """
+    signal_length = end_time - start_time
+    fig, ax = plt.subplots(figsize=fig_size, sharey=True, sharex=False)
+
+    # Define legend elements
     legend_elements = [
         mlines.Line2D([], [], marker='o', color='#FF0000', mec='k', label='Prob (Eq)', markersize=8),
         mlines.Line2D([], [], marker='o', color='green', mec='k', label='Prob (Exp)', markersize=8),
         mlines.Line2D([], [], marker='o', color='blue', mec='k', label='Prob (Su)', markersize=8)
     ]
 
+    # Apply Butterworth filter to the data
     data = np.array(big_reshaped_data)[:, 0, 2, :]
     data = np.array(butterworth_filter(data, 0.5, 15, orig_sr, 4, 'bandpass'))
 
-    for i in range(len(data)):
-        time = np.linspace(0, signal_length, len(data[i]))
-
+    for i, waveform in enumerate(data):
+        time = np.linspace(0, signal_length, len(waveform))
 
         for row, (ml_probs, ml_title, window_size) in enumerate(stn_probs):
             sample_probs = np.squeeze(np.array(ml_probs))
             points = np.linspace(0, signal_length - window_size, sample_probs[i].shape[0]) + window_size / 2
-            ax.plot(time, (data[i] / np.max(abs(data[i]))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            
+            # Plot waveform
+            ax.plot(time, (waveform / np.max(abs(waveform))) + 2 * i, c='k', lw=0.5, zorder=1, alpha=0.5)
+            
+            # Process model probabilities
             model_probs = np.array(ml_probs).reshape(len(data), -1, 4)
             sample_probs = model_probs[i]
             plot_scatter(ax, points, sample_probs, 2 * i, ['#FF0000', 'g', 'white', 'b'])
+            
+            # Compute and plot average probabilities
             avg_probs = np.mean(model_probs, axis=0)
             plot_scatter(ax, points, avg_probs, -2, ['#FF0000', 'g', 'white', 'b'])
+            
+            # Set axis limits and title
             ax.set_xlim(0, signal_length)
             max_eq_prob, max_exp_prob, _, max_su_prob = np.round(np.max(np.mean(model_probs, axis=0), axis=0).astype('float'), 1)
-            ax.set_title(f'{ml_title}, Max Eq:{max_eq_prob}, Max Exp:{max_exp_prob}, Max Su:{max_su_prob}')
+            ax.set_title(f'{ml_title}, Max Eq: {max_eq_prob}, Max Exp: {max_exp_prob}, Max Su: {max_su_prob}')
 
+    # Add legend and format plot
     ax.legend(handles=legend_elements, loc='upper left', fontsize=8)
     plt.yticks(np.arange(0, 2 * len(data), 2), np.array(big_station_ids).reshape(len(data), 3)[:, 2])
-    fig.suptitle('time since'+str(start_time), y=0.99)
+    fig.suptitle(f'Time since {start_time}', y=0.99)
     fig.tight_layout()
     plt.show()
-
-    
-
