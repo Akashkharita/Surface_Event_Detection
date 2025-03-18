@@ -295,7 +295,7 @@ def compute_window_probs(
     big_station_wise_probs, big_reshaped_data, big_station_ids = [], [], []
     signal_length = end_time - start_time
 
-    for stn_id in tqdm(stations_id):
+    for stn_id in stations_id:
         network, station = stn_id.split('.')
         station_ids = []
         sample_st = process_station(network, station, location, start_time, end_time, channel_patterns, client)
@@ -307,7 +307,7 @@ def compute_window_probs(
         try:
             reshaped_data = reshape_and_resample(sample_st, signal_length, fs=orig_sr)
             station_ids.append([sample_st[i].id for i in range(len(sample_st))][:3])
-            print("Reshaped data:", reshaped_data.shape)
+            #print("Reshaped data:", reshaped_data.shape)
         except ValueError as e:
             print(f"Unable to reshape data for station {station}. Error: {e}")
             continue
