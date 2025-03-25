@@ -255,8 +255,6 @@ def extract_spectrograms(waveforms, fs, nperseg=256, overlap=0.5):
     return spectrograms
 
 
-
-
 def compute_window_probs(
     stations_id, st_all, location, start_time, end_time, channel_patterns, client,
     orig_sr, new_sr, window_length, lowpass, stride, highpass, one_d,
@@ -383,8 +381,6 @@ def compute_window_probs(
     return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all
 
 
-
-
 # Function to plot scatter points
 def plot_scatter(ax, points, probs, offset, colors):
     """
@@ -402,7 +398,6 @@ def plot_scatter(ax, points, probs, offset, colors):
     ax.scatter(points, exp_probs + offset, c=colors[1], ec='k')
     ax.scatter(points, no_probs + offset, c=colors[2], ec='k')
     ax.scatter(points, su_probs + offset, c=colors[3], ec='k')
-
 
     
 # Function to plot probabilities from multiple models
@@ -469,8 +464,6 @@ def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr,
     plt.show()
 
 
-
-
 def plot_single_model_probs(stn_probs, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size=(10, 15)):
     """
     Plots probability distributions for a single model over time across multiple stations.
@@ -528,3 +521,4 @@ def plot_single_model_probs(stn_probs, big_reshaped_data, orig_sr, start_time, e
     fig.suptitle(f'Time since {start_time}', y=0.99)
     fig.tight_layout()
     plt.show()
+
