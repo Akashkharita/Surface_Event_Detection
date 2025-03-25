@@ -32,7 +32,7 @@ import scipy.signal as signal
 
 # Check if a GPU is available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
+print("This will run on a: ",device)
 
 
 num_channels = 3
