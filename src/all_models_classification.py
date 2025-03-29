@@ -214,7 +214,7 @@ def sort_stream_by_channel_component(st):
 
 
 def get_waveform_station(network, station, location, start_time, end_time,
-                         channel_patterns, client, st_all, plot_data=False, integrate_SM=False):
+                         channel_patterns, client, st_all, integrate_SM=False, plot_data=False):
     """
     Processes a seismic station by fetching available waveform data.
 
@@ -227,8 +227,8 @@ def get_waveform_station(network, station, location, start_time, end_time,
         channel_patterns (list): List of channel prefixes to check (e.g., ['HH', 'BH', 'EH']).
         client (Client): FDSN client instance.
         st_all (Stream): Cumulative stream of station data.
-        plot_data (bool, optional): If True, plots the retrieved waveforms.
         integrate_SM (bool, optional): If true, integrate SM data to velocity.
+        plot_data (bool, optional): If True, plots the retrieved waveforms.
 
     Returns:
         tuple:
@@ -245,8 +245,6 @@ def get_waveform_station(network, station, location, start_time, end_time,
         inventory = get_station_inventory(network, station, location, start_time, end_time, client)
         if inventory is None:
             return Stream(), st_all
-
-        print('')
         st_station = Stream()
 
         # Loop over networks and stations in the inventory.
