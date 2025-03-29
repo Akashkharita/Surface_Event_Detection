@@ -361,6 +361,27 @@ def extract_spectrograms(waveforms, fs, nperseg=256, overlap=0.5):
     return spectrograms
 
 
+def extract_snr_yiyu(tr):
+    tr.detrend()
+    tr.resample(100)
+    sr = tr.stats.sampling_rate
+    no_win = tr.data[int(0*sr):int(3*sr)]
+    denom = np.percentile(np.abs(no_win), 0.98)
+    sig_win = tr.data[int(10*sr):int(13*sr)]
+    numer = np.percentile(np.abs(sig_win), 0.98)
+    return 20*np.log10(numer/denom)
+
+
+def extract_snr_akash(tr):
+    tr.detrend()
+    tr.resample(100)
+    tr.filter('bandpass', freqmin = 1, freqmax = 20)
+    sr = tr.stats.sampling_rate
+    denom = np.std(abs(tr.data))
+    numer = np.max(abs(tr.data))
+    return numer/denom
+
+
 def compute_window_probs(
     stations_id, st_all, location, start_time, end_time, channel_patterns, client,
     orig_sr, new_sr, window_length, lowpass, stride, highpass, one_d,
@@ -397,7 +418,7 @@ def compute_window_probs(
             big_station_ids (list): List of station IDs corresponding to the data.
             st_all (Stream): Updated cumulative waveform stream.
     """
-    big_station_wise_probs, big_reshaped_data, big_station_ids = [], [], []
+    big_station_wise_probs, big_reshaped_data, big_station_ids, snrs_1, snrs_2 = [], [], [], [], []
     signal_length = end_time - start_time
 
     # If we are not retaining previously downloaded data, start fresh.
@@ -408,6 +429,13 @@ def compute_window_probs(
         network, station = stn_id.split('.')
         station_ids = []
         sample_st, st_all = get_waveform_station(network, station, location, start_time, end_time, channel_patterns, client, st_all, integrate_SM)
+        try:
+            tr = sample_st[2]
+            snr1 = extract_snr_yiyu(tr)
+            snr2 = extract_snr_akash(tr)
+        except:
+            snr1 = 0
+            snr2 = 0
         if len(sample_st) == 0:
             #print(f"No valid & gapless data available for station {station}. Skipping.")
             continue
@@ -480,12 +508,14 @@ def compute_window_probs(
                         station_wise_probs.append(best_model.predict_proba(features))
                     except:
                         station_wise_probs.append(np.array([[0, 0, 0, 0]]))
-            
+
+        snrs_1.append(snr1)            
+        snrs_2.append(snr2)
         big_station_wise_probs.append(station_wise_probs)
         big_reshaped_data.append(reshaped_data)
         big_station_ids.append(station_ids)
     
-    return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all
+    return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all, snrs_1, snrs_2
 
 
 # Function to plot scatter points
