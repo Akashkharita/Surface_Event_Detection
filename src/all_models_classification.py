@@ -82,7 +82,7 @@ def get_station_inventory(network, station, location, start_time, end_time, clie
         )
         return inventory
     except Exception as e:
-        #print(f"Error fetching station data for {station}: {e}")
+        print(f"Error fetching station data for {station}: {e}")
         return None
 
 
@@ -169,8 +169,6 @@ def fetch_waveform_data(client, network, station, location, channels_str, start_
         from obspy import Stream
         return Stream()
 
-
-from obspy import Stream
 
 def sort_stream_by_channel_component(st):
     """
@@ -365,9 +363,9 @@ def extract_snr_yiyu(tr):
     tr.detrend()
     tr.resample(100)
     sr = tr.stats.sampling_rate
-    no_win = tr.data[int(0*sr):int(3*sr)]
+    no_win = tr.data[int(0*sr):int(90*sr)]
     denom = np.percentile(np.abs(no_win), 0.98)
-    sig_win = tr.data[int(10*sr):int(13*sr)]
+    sig_win = tr.data[int(90*sr):int(180*sr)]
     numer = np.percentile(np.abs(sig_win), 0.98)
     return 20*np.log10(numer/denom)
 
@@ -382,8 +380,23 @@ def extract_snr_akash(tr):
     return numer/denom
 
 
+def extract_snr_alex(tr0, offset):
+    tr = tr0.copy()
+    tr.detrend()
+    sr = 100
+    tr.filter('bandpass', freqmin = 1, freqmax = 20)
+    tr.resample(sr)
+    i1 = max(int(1*sr),2)
+    i2 = min(int((offset-10)*sr),tr.npts-3)
+    i3 = min(int((offset-5)*sr),tr.npts-2)
+    i5 = min(int((offset+20)*sr),tr.npts)
+    noise = np.percentile(np.abs(tr.data[i1:i2]), 98)
+    signal = np.percentile(np.abs(tr.data[i3:i4]), 98)
+    return signal/noise
+
+
 def compute_window_probs(
-    stations_id, st_all, location, start_time, end_time, channel_patterns, client,
+    stations_id, dists_km, st_all, location, start_time, end_time, channel_patterns, client,
     orig_sr, new_sr, window_length, lowpass, stride, highpass, one_d,
     model, model_type='dl', filename='P_10_30_F_05_15_50', remember_st=True, integrate_SM=False
 ):
@@ -392,6 +405,7 @@ def compute_window_probs(
 
     Parameters:
     - stations_id (list): List of station IDs in 'NET.STA' format.
+    - dists_km: Distances of stations in km to be used to get approx P travel times.
     - st_all (Stream): Cumulative stream of waveform data. Should be an ObsPy Stream.
     - location (str): Location identifier.
     - start_time (UTCDateTime): Start time for waveform data.
@@ -418,24 +432,29 @@ def compute_window_probs(
             big_station_ids (list): List of station IDs corresponding to the data.
             st_all (Stream): Updated cumulative waveform stream.
     """
-    big_station_wise_probs, big_reshaped_data, big_station_ids, snrs_1, snrs_2 = [], [], [], [], []
+    big_station_wise_probs, big_reshaped_data, big_station_ids, snrs = [], [], [], []
     signal_length = end_time - start_time
+    offset = window_length + (stride/orig_sr)
 
     # If we are not retaining previously downloaded data, start fresh.
     if not remember_st or not (isinstance(st_all, Stream) and len(st_all) > 0):
         st_all = Stream()
 
-    for stn_id in stations_id:
+    for k in range(0,len(stations_id)):
+        stn_id = stations_id[k]
+        Poffset = dists_km[k] / 6. # adjust time window for approx P travel time
+        start_timeP = start_time + Poffset
+        end_timeP = end_time + Poffset
         network, station = stn_id.split('.')
         station_ids = []
-        sample_st, st_all = get_waveform_station(network, station, location, start_time, end_time, channel_patterns, client, st_all, integrate_SM)
+        sample_st, st_all = get_waveform_station(network, station, location, start_timeP, end_timeP, channel_patterns, client, st_all, integrate_SM)
         try:
             tr = sample_st[2]
-            snr1 = extract_snr_yiyu(tr)
-            snr2 = extract_snr_akash(tr)
+            #snr = extract_snr_yiyu(tr)
+            #snr = extract_snr_akash(tr)
+            snr = extract_snr_alex(tr, offset)
         except:
-            snr1 = 0
-            snr2 = 0
+            snr = 0
         if len(sample_st) == 0:
             #print(f"No valid & gapless data available for station {station}. Skipping.")
             continue
@@ -509,13 +528,12 @@ def compute_window_probs(
                     except:
                         station_wise_probs.append(np.array([[0, 0, 0, 0]]))
 
-        snrs_1.append(snr1)            
-        snrs_2.append(snr2)
+        snrs.append(snr)
         big_station_wise_probs.append(station_wise_probs)
         big_reshaped_data.append(reshaped_data)
         big_station_ids.append(station_ids)
     
-    return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all, snrs_1, snrs_2
+    return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all, snrs
 
 
 # Function to plot scatter points
