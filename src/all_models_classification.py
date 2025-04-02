@@ -3,44 +3,34 @@ import sys
 import random
 from glob import glob
 from datetime import datetime
-
+import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import lines as mlines
-
+import matplotlib.lines as mlines
 import h5py
 import obspy
 from obspy import UTCDateTime, Stream
 from obspy.clients.fdsn import Client
-
 from scipy import stats, signal
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, TensorDataset, random_split
 import torchvision.transforms as transforms
-
 from tqdm import tqdm
 from joblib import dump, load
 
-sys.path.append('../src')
-from utils import apply_cosine_taper, butterworth_filter, resample_array
-
-
-# Specify the directory containing the module
+# Add other modules from this repo:
+#   Add the path to the dir ../src
 module_path = os.path.abspath(os.path.join('..', 'src'))
-import matplotlib.lines as mlines
-
-# Add the directory to sys.path
 if module_path not in sys.path:
     sys.path.append(module_path)
-
 import seis_feature
+
 from utils import apply_cosine_taper, butterworth_filter, resample_array
- 
+
 #----------------------------
 
 # Device Configuration
@@ -54,14 +44,6 @@ one_d = False  # Flag for 1D data processing
 
 # Seismic Data Parameters
 client = Client("IRIS")  # Initialize FDSN client (e.g., IRIS)
-stations_id = ['CC.WOW', 'CC.TAVI', 'CC.GNOB', 'CC.ARAT', 'CC.TABR', 'UW.RER']  # Station IDs
-location = "*"  # Consider all available locations
-channel_patterns = ["EH", "BH", "HH"]  # Channel types to consider
-
-# Time Parameters
-start_time = obspy.UTCDateTime(2024, 8, 15, 17, 39, 52)  # Start time of data retrieval
-end_time = start_time + 300  # End time (300 seconds later)
-signal_length = end_time - start_time  # Total duration of the signal
 
 # Sampling Parameters
 orig_sr = 100  # Original sampling rate (Hz)
@@ -72,9 +54,8 @@ stride = 10 * os  # Stride length for windowing
 window_length = 100  # Window length for processing
 
 # Filtering Parameters
-lowpass = 1  # Low-pass filter cutoff frequency (Hz)
-highpass = 20  # High-pass filter cutoff frequency (Hz)
-
+lowpass = 1  # Bandpass filter low-frequency corner (Hz)
+highpass = 20  # Bandpass filter high-frequency corner (Hz)
 
 ##---functions--start---here----##
 
@@ -97,7 +78,7 @@ def get_station_inventory(network, station, location, start_time, end_time, clie
     try:
         inventory = client.get_stations(
             network=network, station=station, location=location,
-            channel="*H*", starttime=start_time, endtime=end_time, level="channel"
+            channel="*", starttime=start_time, endtime=end_time, level="channel"
         )
         return inventory
     except Exception as e:
@@ -105,81 +86,200 @@ def get_station_inventory(network, station, location, start_time, end_time, clie
         return None
 
 
-def has_three_components(station, prefix):
+def return_three_components(station, prefix):
     """
-    Checks if a station has all three components (E, N, Z) for a given channel prefix.
+    For a given station and channel prefix, return a set of three channel codes to download.
+    
+    For non-'EH' prefixes, the expected three channels are:
+        {prefix + "E", prefix + "N", prefix + "Z"}
+    For the 'EH' prefix, two cases are allowed:
+      1. If the station has a full EH set: {"EHE", "EHN", "EHZ"} then return that.
+      2. Otherwise, if the station has only an EH vertical (i.e. {"EHZ"}) and 
+         either a full set of EN channels {"ENE", "ENN"} is available or a full set 
+         of HN channels {"HNE", "HNN"} is available, return the corresponding set:
+            - {"EHZ", "ENE", "ENN"}  OR  {"EHZ", "HNE", "HNN"}
+    
+    If none of these conditions is met, return None.
+    
+    Parameters:
+        station (Station): A station object from the inventory.
+        prefix (str): A channel prefix (e.g., 'HH', 'BH', or 'EH').
+        
+    Returns:
+        set or None: A set of channel codes to request (or None if not available).
+    """
+    if prefix != 'EH':
+        channels = {chan.code for chan in station.channels if chan.code.startswith(prefix)}
+        required = {f"{prefix}E", f"{prefix}N", f"{prefix}Z"}
+        if required.issubset(channels):
+            return required
+        else:
+            return None
+    else:
+        # For EH, first try the standard EH set.
+        channels_eh = {chan.code for chan in station.channels if chan.code.startswith('EH')}
+        full_eh = {"EHE", "EHN", "EHZ"}
+        if full_eh.issubset(channels_eh):
+            return full_eh
+        # Otherwise, if only EHZ is present from EH, check alternatives.
+        if channels_eh == {"EHZ"}:
+            channels_en = {chan.code for chan in station.channels if chan.code.startswith('EN')}
+            channels_hn = {chan.code for chan in station.channels if chan.code.startswith('HN')}
+            if {"ENE", "ENN"}.issubset(channels_en):
+                return {"ENE", "ENN", "EHZ"}
+            elif {"EN1", "EN2"}.issubset(channels_en):
+                return {"EN1", "EN2", "EHZ"}
+            elif {"HNE", "HNN"}.issubset(channels_hn):
+                return {"HNE", "HNN", "EHZ"}
+            elif {"HN1", "HN2"}.issubset(channels_hn):
+                return {"HN1", "HN2", "EHZ"}
+            else:
+                return {"EHZ", "EHZ", "EHZ"}
+        return None
+
+
+def fetch_waveform_data(client, network, station, location, channels_str, start_time, end_time):
+    """
+    Retrieves waveform data from the FDSN client for given channel codes.
 
     Parameters:
-    - station (Station): Station object from the inventory.
-    - prefix (str): Channel prefix (e.g., 'EH', 'BH', 'HH').
+        client (Client): FDSN client instance.
+        network (str): Seismic network code.
+        station (str): Station code.
+        location (str): Location identifier.
+        channels_str (str): Channel codes as a comma-separated string.
+        start_time (UTCDateTime): Start time for data retrieval.
+        end_time (UTCDateTime): End time for data retrieval.
 
     Returns:
-    - bool: True if all three components (E, N, Z) exist, otherwise False.
-    """
-    channels = {chan.code for chan in station.channels if chan.code.startswith(prefix)}
-    return {f"{prefix}E", f"{prefix}N", f"{prefix}Z"}.issubset(channels)
-
-
-def fetch_waveform_data(client, network, station, location, prefix, start_time, end_time):
-    """
-    Retrieves waveform data from the FDSN client for a given station and channel prefix.
-
-    Parameters:
-    - client (Client): FDSN client instance.
-    - network (str): Seismic network code.
-    - station (str): Station code.
-    - location (str): Location identifier.
-    - prefix (str): Channel prefix (e.g., 'EH', 'BH', 'HH').
-    - start_time (UTCDateTime): Start time for data retrieval.
-    - end_time (UTCDateTime): End time for data retrieval.
-
-    Returns:
-    - Stream: Waveform data stream (empty if retrieval fails).
+        Stream: Waveform data stream (empty if retrieval fails).
     """
     try:
+        textra = 0.05  # small buffer for IRIS slicing issues
         st = client.get_waveforms(
             network=network, station=station, location=location,
-            channel=f"{prefix}?", starttime=start_time, endtime=end_time
+            channel=channels_str,
+            starttime=start_time - textra, endtime=end_time,
+            minimumlength=end_time - start_time - textra
         )
+        st.trim(start_time, end_time)
         return st
     except Exception as e:
         print(f"Error fetching waveform data for {station}: {e}")
+        from obspy import Stream
         return Stream()
 
 
-def process_station(network, station, location, start_time, end_time, channel_patterns, client, plot_data=False):
+def sort_stream_by_channel_component(st):
+    """
+    Sort an ObsPy Stream (with three traces) by the last character of each trace's channel code.
+    The desired ordering depends on which set of endings is present:
+      - If the endings are {'Z', '1', '2'}, then the order should be:
+          Traces ending in '1' come first, then '2', then 'Z'.
+      - If the endings are {'1', '2', '3'}, then the order should be:
+          Traces ending in '2' come first, then '3', then '1'.
+      - If the endings are {'Z', 'N', 'E'}, then the order should be:
+          Traces ending in 'E' come first, then 'N', then 'Z'.
+    If the endings do not exactly match any of these sets, the function does not resort.
+    Parameters:
+        st (obspy.Stream): An ObsPy Stream containing three traces.
+        
+    Returns:
+        obspy.Stream: A new Stream with traces sorted according to the specified ordering.
+    """
+    # Extract the set of last characters from each trace's channel code.
+    endings = {tr.stats.channel[-1] for tr in st}
+    
+    # Determine the ordering mapping based on the endings present.
+    if endings == {'Z', '1', '2'}:
+        # Desired order: '1' -> '2' -> 'Z'
+        mapping = {'1': 0, '2': 1, 'Z': 2}
+    elif endings == {'1', '2', '3'}:
+        # Desired order: '2' -> '3' -> '1'
+        mapping = {'2': 0, '3': 1, '1': 2}
+    elif endings == {'Z', 'N', 'E'}:
+        # Desired order: 'E' -> 'N' -> 'Z'
+        mapping = {'E': 0, 'N': 1, 'Z': 2}
+    else:
+        return(st)
+
+    # Sort the stream. For each trace, use the mapping value for its channel's last character.
+    # If a trace's last character is not in mapping, default to 99 (placing it at the end).
+    sorted_traces = sorted(st, key=lambda tr: mapping.get(tr.stats.channel[-1], 99))
+    
+    # Return a new ObsPy Stream with the sorted traces.
+    return Stream(sorted_traces)
+
+
+def get_waveform_station(network, station, location, start_time, end_time,
+                         channel_patterns, client, st_all, integrate_SM=False, plot_data=False):
     """
     Processes a seismic station by fetching available waveform data.
 
     Parameters:
-    - network (str): Seismic network code.
-    - station (str): Station code.
-    - location (str): Location identifier.
-    - start_time (UTCDateTime): Start time for data retrieval.
-    - end_time (UTCDateTime): End time for data retrieval.
-    - channel_patterns (list): List of channel prefixes to check (e.g., ['EH', 'BH', 'HH']).
-    - client (Client): FDSN client instance.
-    - plot_data (bool, optional): If True, plots the retrieved waveforms.
+        network (str): Seismic network code.
+        station (str): Station code.
+        location (str): Location identifier.
+        start_time (UTCDateTime): Start time for data retrieval.
+        end_time (UTCDateTime): End time for data retrieval.
+        channel_patterns (list): List of channel prefixes to check (e.g., ['HH', 'BH', 'EH']).
+        client (Client): FDSN client instance.
+        st_all (Stream): Cumulative stream of station data.
+        integrate_SM (bool, optional): If true, integrate SM data to velocity.
+        plot_data (bool, optional): If True, plots the retrieved waveforms.
 
     Returns:
-    - Stream: Combined waveform data stream for the station.
+        tuple:
+            st_station (Stream): Data stream for the station containing all channels.
+            st_all (Stream): Updated cumulative stream with station data appended.
     """
-    inventory = get_station_inventory(network, station, location, start_time, end_time, client)
-    if inventory is None:
-        return Stream()
+    import time
+    from obspy import Stream
 
-    st_big = []
-    for net in inventory:
-        for sta in net:
-            for prefix in channel_patterns:
-                if has_three_components(sta, prefix):
-                    st = fetch_waveform_data(client, net.code, sta.code, location, prefix, start_time, end_time)
-                    st_big += st
-                    if plot_data:
-                        st.plot()
-                    break  # Stop after finding one valid channel prefix
+    # Check if station has already been downloaded
+    if len(st_all) > 0 and any(tr.stats.station == station for tr in st_all):
+        st_station = st_all.select(station=station)
+    else:
+        inventory = get_station_inventory(network, station, location, start_time, end_time, client)
+        if inventory is None:
+            return Stream(), st_all
+        st_station = Stream()
 
-    return Stream(st_big)
+        # Loop over networks and stations in the inventory.
+        for net in inventory:
+            for sta in net:
+                # Try each prefix in order.
+                for prefix in channel_patterns:
+                    channels_set = return_three_components(sta, prefix)
+                    if channels_set is not None:
+                        # Build a channel string by joining the returned codes.
+                        # Example: "HHE,HHN,HHZ" or "ENE,ENN,EHZ"
+                        channel_str = ",".join(sorted(channels_set))
+                        time.sleep(0.05)  # intentional pause to avoid IRIS IP jail due to too many concurrent requests
+                        st = fetch_waveform_data(client, net.code, sta.code, location, channel_str, start_time, end_time)
+                        # Make sure the stream is channel component ordered: E,N,Z (or 1,2,Z or 1,2,3)
+                        if len(st) == 3:
+                           st = sort_stream_by_channel_component(st)
+                        # Spoof for if EHZ is only trace: have stream = 3 EHZ traces
+                        if channels_set == {'EHZ'} and len(st) == 1:
+                            st.append(st[0].copy())
+                            st.append(st[0].copy())
+                        # Do you want to integrate strong motion to velocity? Assumes data later filtered above 1Hz
+                        if integrate_SM == True:
+                            for tr in st:
+                                if tr.stats.channel[1] == 'N':
+                                    tr.detrend('demean').detrend('linear').taper(0.01).filter('highpass',freq=0.3).integrate()
+                        st_station += st
+                        if plot_data:
+                            st.plot()
+                        break  # Found a valid set, no need to try further prefixes.
+                else:
+                    # Continue to next station if none of the prefixes returned a valid set.
+                    continue
+                # Break out of outer loops if data for station has been obtained.
+                break
+        st_all += st_station
+    return st_station, st_all
 
 
 def taper_and_bandpass_filter(data, lowcut, highcut, fs):
@@ -259,55 +359,109 @@ def extract_spectrograms(waveforms, fs, nperseg=256, overlap=0.5):
     return spectrograms
 
 
+def extract_snr_yiyu(tr):
+    tr.detrend()
+    tr.resample(100)
+    sr = tr.stats.sampling_rate
+    no_win = tr.data[int(0*sr):int(90*sr)]
+    denom = np.percentile(np.abs(no_win), 0.98)
+    sig_win = tr.data[int(90*sr):int(180*sr)]
+    numer = np.percentile(np.abs(sig_win), 0.98)
+    return 20*np.log10(numer/denom)
+
+
+def extract_snr_akash(tr):
+    tr.detrend()
+    tr.resample(100)
+    tr.filter('bandpass', freqmin = 1, freqmax = 20)
+    sr = tr.stats.sampling_rate
+    denom = np.std(abs(tr.data))
+    numer = np.max(abs(tr.data))
+    return numer/denom
+
+
+def extract_snr_alex(tr0, offset):
+    tr = tr0.copy()
+    tr.detrend()
+    sr = 100
+    tr.filter('bandpass', freqmin = 1, freqmax = 20)
+    tr.resample(sr)
+    i1 = max(int(1*sr),2)
+    i2 = min(int((offset-10)*sr),tr.npts-3)
+    i3 = min(int((offset-5)*sr),tr.npts-2)
+    i5 = min(int((offset+20)*sr),tr.npts)
+    noise = np.percentile(np.abs(tr.data[i1:i2]), 98)
+    signal = np.percentile(np.abs(tr.data[i3:i4]), 98)
+    return signal/noise
 
 
 def compute_window_probs(
-    stations_id, location, start_time, end_time, channel_patterns, client,
+    stations_id, dists_km, st_all, location, start_time, end_time, channel_patterns, client,
     orig_sr, new_sr, window_length, lowpass, stride, highpass, one_d,
-    model, model_type='dl', filename='P_10_30_F_05_15_50'
+    model, model_type='dl', filename='P_10_30_F_05_15_50', remember_st=True, integrate_SM=False
 ):
     """
     Computes probability outputs for seismic stations using deep learning (DL) or machine learning (ML) models.
 
     Parameters:
     - stations_id (list): List of station IDs in 'NET.STA' format.
+    - dists_km: Distances of stations in km to be used to get approx P travel times.
+    - st_all (Stream): Cumulative stream of waveform data. Should be an ObsPy Stream.
     - location (str): Location identifier.
     - start_time (UTCDateTime): Start time for waveform data.
     - end_time (UTCDateTime): End time for waveform data.
-    - channel_patterns (list): List of channel prefixes to check (e.g., ['EH', 'BH', 'HH']).
+    - channel_patterns (list): List of channel prefixes to check (e.g., ['HH', 'BH', 'EH']).
     - client (Client): FDSN client instance.
     - orig_sr (int): Original sampling rate (Hz).
     - new_sr (int): New sampling rate (Hz) after resampling.
     - window_length (int): Window length in seconds.
-    - lowpass (float): Low-pass filter cutoff frequency (Hz).
-    - stride (int): Stride length in samples.
-    - highpass (float): High-pass filter cutoff frequency (Hz).
+    - lowpass (float): Bandpass filter low frequency corner (Hz).
+    - stride (int): Window moving increment in samples (using original sample rate).
+    - highpass (float): Bandpass filter high frequency corner (Hz).
     - one_d (bool): If True, uses a 1D model instead of spectrogram-based input.
     - model (PyTorch model or ML model): Trained model for classification.
     - model_type (str, optional): 'dl' for deep learning, 'ml' for machine learning. Defaults to 'dl'.
     - filename (str, optional): File identifier for model-related parameters. Defaults to 'P_10_30_F_05_15_50'.
+    - remember_st (optional, default = True): retain the st_all stream in order to only download data once from a station.
+    - integrate_SM (optional, default = False): integrate SM data to velocity (with pre-highpass filter above 0.3Hz).
 
     Returns:
-    - big_station_wise_probs (list): Probability outputs for each station.
-    - big_reshaped_data (list): Reshaped and processed waveform data.
-    - big_station_ids (list): List of station IDs corresponding to the data.
+        tuple:
+            big_station_wise_probs (list): Probability outputs for each station.
+            big_reshaped_data (list): Reshaped and processed waveform data.
+            big_station_ids (list): List of station IDs corresponding to the data.
+            st_all (Stream): Updated cumulative waveform stream.
     """
-    big_station_wise_probs, big_reshaped_data, big_station_ids = [], [], []
+    big_station_wise_probs, big_reshaped_data, big_station_ids, snrs = [], [], [], []
     signal_length = end_time - start_time
+    offset = window_length + (stride/orig_sr)
 
-    for stn_id in stations_id:
+    # If we are not retaining previously downloaded data, start fresh.
+    if not remember_st or not (isinstance(st_all, Stream) and len(st_all) > 0):
+        st_all = Stream()
+
+    for k in range(0,len(stations_id)):
+        stn_id = stations_id[k]
+        Poffset = dists_km[k] / 6. # adjust time window for approx P travel time
+        start_timeP = start_time + Poffset
+        end_timeP = end_time + Poffset
         network, station = stn_id.split('.')
         station_ids = []
-        sample_st = process_station(network, station, location, start_time, end_time, channel_patterns, client)
-
+        sample_st, st_all = get_waveform_station(network, station, location, start_timeP, end_timeP, channel_patterns, client, st_all, integrate_SM)
+        try:
+            tr = sample_st[2]
+            #snr = extract_snr_yiyu(tr)
+            #snr = extract_snr_akash(tr)
+            snr = extract_snr_alex(tr, offset)
+        except:
+            snr = 0
         if len(sample_st) == 0:
-            print(f"No valid data available for station {station}. Skipping.")
+            #print(f"No valid & gapless data available for station {station}. Skipping.")
             continue
 
         try:
             reshaped_data = reshape_and_resample(sample_st, signal_length, fs=orig_sr)
             station_ids.append([sample_st[i].id for i in range(len(sample_st))][:3])
-            #print("Reshaped data:", reshaped_data.shape)
         except ValueError as e:
             print(f"Unable to reshape data for station {station}. Error: {e}")
             continue
@@ -373,14 +527,13 @@ def compute_window_probs(
                         station_wise_probs.append(best_model.predict_proba(features))
                     except:
                         station_wise_probs.append(np.array([[0, 0, 0, 0]]))
-            
+
+        snrs.append(snr)
         big_station_wise_probs.append(station_wise_probs)
         big_reshaped_data.append(reshaped_data)
         big_station_ids.append(station_ids)
     
-    return big_station_wise_probs, big_reshaped_data, big_station_ids
-
-
+    return big_station_wise_probs, big_reshaped_data, big_station_ids, st_all, snrs
 
 
 # Function to plot scatter points
@@ -400,7 +553,6 @@ def plot_scatter(ax, points, probs, offset, colors):
     ax.scatter(points, exp_probs + offset, c=colors[1], ec='k')
     ax.scatter(points, no_probs + offset, c=colors[2], ec='k')
     ax.scatter(points, su_probs + offset, c=colors[3], ec='k')
-
 
     
 # Function to plot probabilities from multiple models
@@ -467,8 +619,6 @@ def plot_all_model_probs(stn_probs_dl, stn_probs_ml, big_reshaped_data, orig_sr,
     plt.show()
 
 
-
-
 def plot_single_model_probs(stn_probs, big_reshaped_data, orig_sr, start_time, end_time, big_station_ids, fig_size=(10, 15)):
     """
     Plots probability distributions for a single model over time across multiple stations.
@@ -526,3 +676,4 @@ def plot_single_model_probs(stn_probs, big_reshaped_data, orig_sr, start_time, e
     fig.suptitle(f'Time since {start_time}', y=0.99)
     fig.tight_layout()
     plt.show()
+
