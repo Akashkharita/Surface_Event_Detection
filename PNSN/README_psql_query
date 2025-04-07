@@ -1,0 +1,20 @@
+
+select n.magnitude, n.magtype, e.evid, e.etype, o.gtype, o.rflag, e.selectflag, to_timestamp(o.datetime) from event e inner join origin o on e.prefor = o.orid inner join netmag n on e.prefmag = n.magid inner join credit c on c.id = o.orid  where o.gtype = 'l' and e.selectflag = 1 and c.tname = 'ORIGIN' and c.refer = 'amyw' and e.etype in ('eq') and o.rflag = 'F' order by o.datetime desc limit 3333;
+      magnitude       | magtype |   evid   | etype | gtype | rflag | selectflag |         to_timestamp          
+----------------------+---------+----------+-------+-------+-------+------------+-------------------------------
+                  0.8 | l       | 62079802 | eq    | l     | F     |          1 | 2025-04-03 05:47:11.309998-07
+                 0.92 | l       | 62079792 | eq    | l     | F     |          1 | 2025-04-03 05:38:39.02-07
+                 0.55 | l       | 62079777 | eq    | l     | F     |          1 | 2025-04-03 04:19:52.289999-07
+                 0.54 | l       | 62079757 | eq    | l     | F     |          1 | 2025-04-02 20:18:10.529999-07
+
+
+
+select n.magnitude, n.magtype, e.evid, e.etype, o.gtype, o.rflag, e.selectflag, to_timestamp(o.datetime) from event e inner join origin o on e.prefor = o.orid inner join netmag n on e.prefmag = n.magid inner join credit c on c.id = o.orid  where o.gtype = 'l' and e.selectflag = 1 and c.tname = 'ORIGIN' and c.refer = 'amyw' and e.etype in ('su') and o.rflag = 'F' and n.magtype != 'h' order by o.datetime desc limit 3333;
+      magnitude      | magtype |   evid   | etype | gtype | rflag | selectflag |         to_timestamp          
+---------------------+---------+----------+-------+-------+-------+------------+-------------------------------
+                1.55 | l       | 62073727 | su    | l     | F     |          1 | 2025-03-15 14:10:11.02-07
+                0.52 | l       | 62080401 | su    | l     | F     |          1 | 2025-03-11 05:43:42.7-07
+                1.52 | l       | 62067067 | su    | l     | F     |          1 | 2025-02-12 02:11:19.209999-08
+                0.31 | l       | 62066792 | su    | l     | F     |          1 | 2025-02-10 06:42:46.9-08
+
+

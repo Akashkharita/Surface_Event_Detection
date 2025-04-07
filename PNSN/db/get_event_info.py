@@ -67,7 +67,6 @@ def get_event_info(evid):
                 algorithm = record[8]
                 if 'HYP' in algorithm:
                     analyst_class = etype
-                #print(evid, orid, odate, lat, lon, dep, mindist, orms, mag, unc, nsta, magalgo )
             #----- Get preferred magnitude
             try:
                 cursor.execute('select n.magnitude, n.magtype from netmag n inner join event e on n.magid = e.prefmag where e.evid = (%s) and e.selectflag = (%s)',(evid,1))
@@ -101,11 +100,9 @@ def get_event_info(evid):
             lon = evinfo[evid][3]
             dep = evinfo[evid][4]
             mag = evinfo[evid][7]
-            #print("TRYING: ",evid, orid)
             cursor.execute('select a.net, a.sta, a.location, a.seedchan, a.datetime, a.iphase, a.qual, a.quality, s.importance, s.wgt, s.timeres, s.delta, s.seaz from arrival a inner join assocaro s on a.arid = s.arid where a.iphase = (%s) and s.orid = (%s) order by s.delta',('P',orid,))
             for record in cursor:
                 adate = unix_to_true_time(record[4])
-                #print(evid,orid,record,adate )
                 if ncount == 0:
                     mindist = record[11]
                 if ncount <= 10 and record[0] != 'US':
@@ -113,7 +110,6 @@ def get_event_info(evid):
                     netstas.append( record[0] + '.' + record[1] )
                     distkm.append(round(record[11]))
                     maxdist = record[11]
-            #print(evid, orid, ordate, lat, lon, dep, mag, mindist, maxdist, netstas, distkm)
     
     #----- Subnet trigger
     elif etype == 'st':
@@ -128,9 +124,6 @@ def get_event_info(evid):
                 distkm.append(0)
                 n += 1
         orid, lat, lon, dep, strmag, mindist, maxdist = 0, 0, 0, 0, 'Md0.0', 0, 0
-
-#    print("ETYPE: ",etype, ' Analyst class: ',analyst_class)
-#    print(orid, ordate, lat, lon, dep, strmag, mindist, maxdist, netstas, distkm, analyst_class)
 
     return (orid, ordate, lat, lon, dep, strmag, mindist, maxdist, netstas, distkm, analyst_class)
 
