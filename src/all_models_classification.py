@@ -381,18 +381,24 @@ def extract_snr_akash(tr):
 
 
 def extract_snr_alex(tr0, offset):
-    tr = tr0.copy()
-    tr.detrend()
-    sr = 100
-    tr.filter('bandpass', freqmin = 1, freqmax = 20)
-    tr.resample(sr)
-    i1 = max(int(1*sr),2)
-    i2 = min(int((offset-10)*sr),tr.npts-3)
-    i3 = min(int((offset-5)*sr),tr.npts-2)
-    i5 = min(int((offset+20)*sr),tr.npts)
-    noise = np.percentile(np.abs(tr.data[i1:i2]), 98)
-    signal = np.percentile(np.abs(tr.data[i3:i4]), 98)
-    return signal/noise
+    try:
+        tr = tr0.copy()
+        tr.detrend()
+        sr = 100
+        tr.filter('bandpass', freqmin = 1, freqmax = 20)
+        tr.resample(sr)
+        i1 = int(sr*10)
+        i2 = max(int((offset-10)*sr),i1+1)
+        i3 = min(int((offset-5)*sr),tr.stats.npts-2)
+        i4 = min(int((offset+20)*sr),tr.stats.npts)
+        noise = np.percentile(np.abs(tr.data[i1:i2]), 98)
+        signal = np.percentile(np.abs(tr.data[i3:i4]), 98)
+        sta = tr.stats.station
+        # plot the trace
+        #tr.plot(outfile = sta + '.png')
+        return signal/noise
+    except:
+        return 0
 
 
 def compute_window_probs(
@@ -434,7 +440,8 @@ def compute_window_probs(
     """
     big_station_wise_probs, big_reshaped_data, big_station_ids, snrs = [], [], [], []
     signal_length = end_time - start_time
-    offset = window_length + (stride/orig_sr)
+    #offset = window_length + (stride/orig_sr)
+    offset = 20. + (window_length/2.) + (stride/orig_sr)
 
     # If we are not retaining previously downloaded data, start fresh.
     if not remember_st or not (isinstance(st_all, Stream) and len(st_all) > 0):
@@ -452,7 +459,7 @@ def compute_window_probs(
             tr = sample_st[2]
             #snr = extract_snr_yiyu(tr)
             #snr = extract_snr_akash(tr)
-            snr = extract_snr_alex(tr, offset)
+            snr = extract_snr_alex(tr, offset + Poffset)
         except:
             snr = 0
         if len(sample_st) == 0:
